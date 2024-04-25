@@ -1,0 +1,79 @@
+image: gcc
+
+variables:
+  SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"  # Defines the location of the analysis task cache
+  GIT_DEPTH: "0"  # Tells git to fetch all the branches of the project, required by the analysis task
+
+get-sonar-binaries:
+  stage: .pre
+  cache:
+    policy: push
+    key: "${CI_COMMIT_SHORT_SHA}"
+    paths:
+      - build-wrapper/
+      - sonar-scanner/
+  script:
+    # Download sonar-scanner
+    - curl -sSLo ./sonar-scanner.zip 'https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip'
+    - unzip -o sonar-scanner.zip
+    - mv sonar-scanner-5.0.1.3006-linux sonar-scanner
+    # Download build-wrapper
+    - curl -sSLo ./build-wrapper-linux-x86.zip "${SONAR_HOST_URL}/static/cpp/build-wrapper-linux-x86.zip"
+    - unzip -oj build-wrapper-linux-x86.zip -d ./build-wrapper
+  only:
+    - merge_requests
+    - main
+
+build:
+  stage: build
+  # install the necessary build tools & libraries
+  before_script:
+    - apt-get update && apt-get -y install cmake wget coreutils gcovr xorg-dev
+    - wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | tee /etc/apt/trusted.gpg.d/lunarg.asc
+    - wget -qO /etc/apt/sources.list.d/lunarg-vulkan-1.3.280-jammy.list https://packages.lunarg.com/vulkan/1.3.280/lunarg-vulkan-1.3.280-jammy.list
+    - apt-get update && apt-get -y install vulkan-sdk
+  cache:
+    policy: pull-push
+    key: "${CI_COMMIT_SHORT_SHA}"
+    paths:
+      - build-wrapper/
+      - sonar-scanner/
+      - bw-output/
+  script:
+    # Run the build inside the build wrapper
+    - cmake -E make_directory build
+    - cmake -DCMAKE_BUILD_TYPE=Debug -DLTB_VST_USE_GLFW=ON  -DLTB_VST_BUILD_TESTS=ON -DLTB_VST_COVERAGE_FLAGS=ON -S . -B build
+    - build-wrapper/build-wrapper-linux-x86-64 --out-dir bw-output cmake --build build
+    - cmake -E chdir build ctest
+    - mkdir coverage && cd coverage
+    - find ../build/CMakeFiles/LtbVst.dir/ -name '*.o' | xargs gcov --preserve-paths
+    - find . -name '*#usr#*' -exec rm {} \;
+    - find . -name '*#external#*' -exec rm {} \;
+    - find . -name '*#_deps#*' -exec rm {} \;
+    - cd ..
+  artifacts:
+    paths:
+      - build/
+      - coverage/
+  only:
+    - merge_requests
+    - main
+
+sonarcloud-check:
+  stage: .post
+  cache:
+    policy: pull
+    key: "${CI_COMMIT_SHORT_SHA}"
+    paths:
+      - build-wrapper/
+      - sonar-scanner/
+      - bw-output/
+  script:
+    - sonar-scanner/bin/sonar-scanner
+      -Dsonar.host.url="${SONAR_HOST_URL}"
+      -Dsonar.token="${SONAR_TOKEN}"
+      -Dsonar.cfamily.build-wrapper-output=bw-output
+      -Dsonar.cfamily.gcov.reportsPath="coverage"
+  only:
+    - merge_requests
+    - main

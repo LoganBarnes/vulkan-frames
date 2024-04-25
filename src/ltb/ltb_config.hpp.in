@@ -1,0 +1,56 @@
+// /////////////////////////////////////////////////////////////
+// A Logan Thomas Barnes project
+// /////////////////////////////////////////////////////////////
+#pragma once
+
+#include <filesystem>
+
+namespace ltb::config
+{
+
+inline auto project_root_dir_path( ) -> std::filesystem::path
+{
+    return "@CMAKE_CURRENT_LIST_DIR@";
+}
+
+inline auto docs_dir_path( ) -> std::filesystem::path
+{
+    return project_root_dir_path( ) / "docs";
+}
+
+inline auto res_dir_path( ) -> std::filesystem::path
+{
+    return project_root_dir_path( ) / "res";
+}
+
+inline auto config_dir_path( ) -> std::filesystem::path
+{
+    return res_dir_path( ) / "config";
+}
+
+inline auto images_dir_path( ) -> std::filesystem::path
+{
+    return res_dir_path( ) / "images";
+}
+
+inline auto models_dir_path( ) -> std::filesystem::path
+{
+    return res_dir_path( ) / "models";
+}
+
+inline auto test_shader_dir_path( ) -> std::filesystem::path
+{
+    return res_dir_path( ) / "shaders";
+}
+
+inline auto generated_dir_path( ) -> std::filesystem::path
+{
+    return "@LTB_VLK_GENERATED_DIR@";
+}
+
+inline auto spriv_shader_dir_path( ) -> std::filesystem::path
+{
+    return generated_dir_path( ) / "shaders";
+}
+
+} // namespace ltb::config
