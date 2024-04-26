@@ -7,6 +7,7 @@
 #include "ltb/vlk/check.hpp"
 #include "ltb/vlk/output.hpp"
 #include "ltb/vlk/pipeline.hpp"
+#include "ltb/vlk/synchronization.hpp"
 
 // standard
 #include <charconv>
@@ -17,12 +18,6 @@ namespace ltb
 {
 namespace
 {
-
-auto constexpr image_extents = VkExtent3D{
-    .width  = 1920,
-    .height = 1080,
-    .depth  = 1,
-};
 
 constexpr auto max_frames_in_flight = uint32_t{ 2 };
 constexpr auto max_possible_timeout = std::numeric_limits< uint64_t >::max( );
@@ -44,137 +39,27 @@ public:
     auto run( ) -> bool;
 
 private:
-    // Common setup objects
-    vlk::SetupData< vlk::AppType::Windowed > setup_ = { };
-
-    // Pools
-    VkDescriptorPool descriptor_pool_ = { };
-
-    // Synchronization objects
-    std::vector< VkCommandBuffer > command_buffers_            = { };
-    std::vector< VkSemaphore >     image_available_semaphores_ = { };
-    std::vector< VkSemaphore >     render_finished_semaphores_ = { };
-    std::vector< VkFence >         graphics_queue_fences_      = { };
-    uint32                         current_frame_              = 0;
-
-    // Output
-    vlk::OutputData< vlk::AppType::Windowed > output_ = { };
-
-    // Pipeline
+    // Vulkan data
+    vlk::SetupData< vlk::AppType::Windowed >     setup_    = { };
+    vlk::OutputData< vlk::AppType::Windowed >    output_   = { };
     vlk::PipelineData< vlk::Pipeline::Triangle > pipeline_ = { };
+    vlk::SyncData< vlk::AppType::Windowed >      sync_     = { };
 };
 
 App::~App( )
 {
+    vlk::destroy( setup_, sync_ );
     vlk::destroy( setup_, pipeline_ );
     vlk::destroy( setup_, output_ );
-
-    for ( auto* const fence : graphics_queue_fences_ )
-    {
-        ::vkDestroyFence( setup_.device, fence, nullptr );
-    }
-    spdlog::debug( "vkDestroyFence()x{}", graphics_queue_fences_.size( ) );
-    graphics_queue_fences_.clear( );
-
-    for ( auto* const semaphore : render_finished_semaphores_ )
-    {
-        ::vkDestroySemaphore( setup_.device, semaphore, nullptr );
-    }
-    spdlog::debug( "vkDestroySemaphore()x{}", render_finished_semaphores_.size( ) );
-    render_finished_semaphores_.clear( );
-
-    for ( auto* const semaphore : image_available_semaphores_ )
-    {
-        ::vkDestroySemaphore( setup_.device, semaphore, nullptr );
-    }
-    spdlog::debug( "vkDestroySemaphore()x{}", image_available_semaphores_.size( ) );
-    image_available_semaphores_.clear( );
-
-    if ( !command_buffers_.empty( ) )
-    {
-        ::vkFreeCommandBuffers(
-            setup_.device,
-            setup_.graphics_command_pool,
-            static_cast< uint32 >( command_buffers_.size( ) ),
-            command_buffers_.data( )
-        );
-        spdlog::debug( "vkFreeCommandBuffers()" );
-    }
-
-    if ( nullptr != descriptor_pool_ )
-    {
-        ::vkDestroyDescriptorPool( setup_.device, descriptor_pool_, nullptr );
-        spdlog::debug( "vkDestroyDescriptorPool()" );
-    }
-
     vlk::destroy( setup_ );
 }
 
 auto App::initialize( uint32 const physical_device_index ) -> bool
 {
-    CHECK_TRUE( vlk::initialize( setup_, physical_device_index ) );
-
-    auto const cmd_buf_alloc_info = VkCommandBufferAllocateInfo{
-        .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .pNext              = nullptr,
-        .commandPool        = setup_.graphics_command_pool,
-        .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = max_frames_in_flight,
-    };
-    command_buffers_.resize( cmd_buf_alloc_info.commandBufferCount );
-    CHECK_VK(
-        ::vkAllocateCommandBuffers( setup_.device, &cmd_buf_alloc_info, command_buffers_.data( ) )
-    );
-    spdlog::debug( "vkAllocateCommandBuffers()" );
-
-    auto const semaphore_create_info = VkSemaphoreCreateInfo{
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0U,
-    };
-
-    image_available_semaphores_.resize( max_frames_in_flight );
-    render_finished_semaphores_.resize( max_frames_in_flight );
-
-    for ( auto i = 0U; i < max_frames_in_flight; ++i )
-    {
-        CHECK_VK( ::vkCreateSemaphore(
-            setup_.device,
-            &semaphore_create_info,
-            nullptr,
-            image_available_semaphores_.data( ) + i
-        ) );
-        CHECK_VK( ::vkCreateSemaphore(
-            setup_.device,
-            &semaphore_create_info,
-            nullptr,
-            render_finished_semaphores_.data( ) + i
-        ) );
-    }
-    spdlog::debug( "vkCreateSemaphore()x{}", max_frames_in_flight );
-    spdlog::debug( "vkCreateSemaphore()x{}", max_frames_in_flight );
-
-    auto const fence_create_info = VkFenceCreateInfo{
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = VK_FENCE_CREATE_SIGNALED_BIT,
-    };
-
-    graphics_queue_fences_.resize( max_frames_in_flight );
-    for ( auto i = 0U; i < max_frames_in_flight; ++i )
-    {
-        CHECK_VK( ::vkCreateFence(
-            setup_.device,
-            &fence_create_info,
-            nullptr,
-            graphics_queue_fences_.data( ) + i
-        ) );
-    }
-    spdlog::debug( "vkCreateFence()x{}", max_frames_in_flight );
-
+    CHECK_TRUE( vlk::initialize( physical_device_index, setup_ ) );
     CHECK_TRUE( vlk::initialize( setup_, output_ ) );
     CHECK_TRUE( vlk::initialize( setup_, pipeline_ ) );
-
+    CHECK_TRUE( vlk::initialize( max_frames_in_flight, setup_, sync_ ) );
     return true;
 }
 
@@ -200,7 +85,7 @@ auto App::run( ) -> bool
             = M_PI_2f * angular_velocity_rps * current_duration_s;
 
         // Render pipeline here.
-        auto* const graphics_queue_fence = graphics_queue_fences_[ current_frame_ ];
+        auto* const graphics_queue_fence = sync_.graphics_queue_fences[ sync_.current_frame ];
 
         auto const graphics_fences = std::array{ graphics_queue_fence };
 
@@ -212,7 +97,8 @@ auto App::run( ) -> bool
             max_possible_timeout
         ) );
 
-        auto* const image_available_semaphore = image_available_semaphores_[ current_frame_ ];
+        auto* const image_available_semaphore
+            = sync_.image_available_semaphores[ sync_.current_frame ];
 
         auto swapchain_image_index = uint32{ 0 };
         CHECK_VK( ::vkAcquireNextImageKHR(
@@ -231,7 +117,7 @@ auto App::run( ) -> bool
             graphics_fences.data( )
         ) );
 
-        auto* const command_buffer = command_buffers_[ current_frame_ ];
+        auto* const command_buffer = sync_.command_buffers[ sync_.current_frame ];
         auto constexpr reset_flags = VkCommandBufferResetFlags{ 0U };
         CHECK_VK( ::vkResetCommandBuffer( command_buffer, reset_flags ) );
 
@@ -311,7 +197,8 @@ auto App::run( ) -> bool
 
         CHECK_VK( ::vkEndCommandBuffer( command_buffer ) );
 
-        auto* const render_finished_semaphore = render_finished_semaphores_[ current_frame_ ];
+        auto* const render_finished_semaphore
+            = sync_.render_finished_semaphores[ sync_.current_frame ];
         auto constexpr semaphore_stage
             = VkPipelineStageFlags{ VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 
@@ -353,7 +240,7 @@ auto App::run( ) -> bool
         };
         CHECK_VK( ::vkQueuePresentKHR( setup_.surface_queue, &present_info ) );
 
-        current_frame_ = ( current_frame_ + 1U ) % max_frames_in_flight;
+        sync_.current_frame = ( sync_.current_frame + 1U ) % max_frames_in_flight;
 
         // This GLFW_KEY_ESCAPE bit shouldn't exist in a final product.
         should_exit = ( GLFW_TRUE == ::glfwWindowShouldClose( setup_.window ) )

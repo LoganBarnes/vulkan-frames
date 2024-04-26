@@ -9,6 +9,7 @@
 #include "ltb/vlk/check.hpp"
 #include "ltb/vlk/output.hpp"
 #include "ltb/vlk/pipeline.hpp"
+#include "ltb/vlk/synchronization.hpp"
 
 // external
 #include <spdlog/spdlog.h>
@@ -52,18 +53,11 @@ public:
     auto run( ) -> bool;
 
 private:
-    // Initialization
-    vlk::SetupData< vlk::AppType::Headless > setup_ = { };
-
-    // Synchronization objects
-    VkCommandBuffer command_buffer_       = { };
-    VkFence         graphics_queue_fence_ = { };
-
-    // Output
-    vlk::OutputData< vlk::AppType::Headless > output_ = { };
-
-    // Pipeline
+    // Vulkan
+    vlk::SetupData< vlk::AppType::Headless >     setup_    = { };
+    vlk::OutputData< vlk::AppType::Headless >    output_   = { };
     vlk::PipelineData< vlk::Pipeline::Triangle > pipeline_ = { };
+    vlk::SyncData< vlk::AppType::Headless >      sync_     = { };
 
     // Networking
     net::FdSocket socket_         = { };
@@ -77,51 +71,18 @@ App::~App( )
         spdlog::error( "close(color_image_fd) failed: {}", std::strerror( errno ) );
     }
 
+    vlk::destroy( setup_, sync_ );
     vlk::destroy( setup_, pipeline_ );
     vlk::destroy( setup_, output_ );
-
-    if ( nullptr != graphics_queue_fence_ )
-    {
-        ::vkDestroyFence( setup_.device, graphics_queue_fence_, nullptr );
-        spdlog::debug( "vkDestroyFence()" );
-    }
-
-    if ( nullptr != command_buffer_ )
-    {
-        ::vkFreeCommandBuffers( setup_.device, setup_.graphics_command_pool, 1, &command_buffer_ );
-        spdlog::debug( "vkFreeCommandBuffers()" );
-    }
-
     vlk::destroy( setup_ );
 }
 
 auto App::initialize( uint32 const physical_device_index ) -> bool
 {
-    CHECK_TRUE( vlk::initialize( setup_, physical_device_index ) );
-
-    auto const cmd_buf_alloc_info = VkCommandBufferAllocateInfo{
-        .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .pNext              = nullptr,
-        .commandPool        = setup_.graphics_command_pool,
-        .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
-    };
-
-    CHECK_VK( ::vkAllocateCommandBuffers( setup_.device, &cmd_buf_alloc_info, &command_buffer_ ) );
-    spdlog::debug( "vkAllocateCommandBuffers()" );
-
-    auto const fence_create_info = VkFenceCreateInfo{
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = VK_FENCE_CREATE_SIGNALED_BIT,
-    };
-    CHECK_VK( ::vkCreateFence( setup_.device, &fence_create_info, nullptr, &graphics_queue_fence_ )
-    );
-    spdlog::debug( "vkCreateFence()" );
-
+    CHECK_TRUE( vlk::initialize( physical_device_index, setup_ ) );
     CHECK_TRUE( vlk::initialize( image_extents, vlk::ExternalMemory::Yes, setup_, output_ ) );
     CHECK_TRUE( vlk::initialize( setup_, pipeline_ ) );
-
+    CHECK_TRUE( vlk::initialize( setup_, sync_ ) );
     return true;
 }
 
@@ -164,7 +125,8 @@ auto App::run( ) -> bool
         }
 
         // Render pipeline here.
-        auto const graphics_fences = std::array{ graphics_queue_fence_ };
+        auto* const graphics_queue_fence = sync_.graphics_queue_fence;
+        auto const  graphics_fences      = std::array{ graphics_queue_fence };
 
         CHECK_VK( ::vkWaitForFences(
             setup_.device,
@@ -180,7 +142,8 @@ auto App::run( ) -> bool
             graphics_fences.data( )
         ) );
 
-        CHECK_VK( ::vkResetCommandBuffer( command_buffer_, 0 ) );
+        auto* const command_buffer = sync_.command_buffer;
+        CHECK_VK( ::vkResetCommandBuffer( command_buffer, 0 ) );
 
         auto const begin_info = VkCommandBufferBeginInfo{
             .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -188,7 +151,7 @@ auto App::run( ) -> bool
             .flags            = 0,
             .pInheritanceInfo = nullptr,
         };
-        CHECK_VK( ::vkBeginCommandBuffer( command_buffer_, &begin_info ) );
+        CHECK_VK( ::vkBeginCommandBuffer( command_buffer, &begin_info ) );
 
         auto const clear_values = std::array{
             VkClearValue{
@@ -208,8 +171,8 @@ auto App::run( ) -> bool
             .pClearValues    = clear_values.data( ),
         };
 
-        ::vkCmdBeginRenderPass( command_buffer_, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE );
-        ::vkCmdBindPipeline( command_buffer_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.pipeline );
+        ::vkCmdBeginRenderPass( command_buffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE );
+        ::vkCmdBindPipeline( command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.pipeline );
 
         auto const viewport = VkViewport{
             .x        = 0.0F,
@@ -221,7 +184,7 @@ auto App::run( ) -> bool
         };
         auto constexpr first_viewport = 0;
         auto constexpr viewport_count = 1;
-        ::vkCmdSetViewport( command_buffer_, first_viewport, viewport_count, &viewport );
+        ::vkCmdSetViewport( command_buffer, first_viewport, viewport_count, &viewport );
 
         auto const scissors = VkRect2D{
             .offset = VkOffset2D{ .x = 0, .y = 0 },
@@ -229,10 +192,10 @@ auto App::run( ) -> bool
         };
         auto constexpr first_scissor = 0;
         auto constexpr scissor_count = 1;
-        ::vkCmdSetScissor( command_buffer_, first_scissor, scissor_count, &scissors );
+        ::vkCmdSetScissor( command_buffer, first_scissor, scissor_count, &scissors );
 
         ::vkCmdPushConstants(
-            command_buffer_,
+            command_buffer,
             pipeline_.pipeline_layout,
             VK_SHADER_STAGE_VERTEX_BIT,
             0,
@@ -241,7 +204,7 @@ auto App::run( ) -> bool
         );
 
         ::vkCmdPushConstants(
-            command_buffer_,
+            command_buffer,
             pipeline_.pipeline_layout,
             VK_SHADER_STAGE_FRAGMENT_BIT,
             sizeof( pipeline_.model_uniforms ),
@@ -253,11 +216,11 @@ auto App::run( ) -> bool
         auto constexpr instance_count = 1;
         auto constexpr first_vertex   = 0;
         auto constexpr first_instance = 0;
-        ::vkCmdDraw( command_buffer_, vertex_count, instance_count, first_vertex, first_instance );
+        ::vkCmdDraw( command_buffer, vertex_count, instance_count, first_vertex, first_instance );
 
-        ::vkCmdEndRenderPass( command_buffer_ );
+        ::vkCmdEndRenderPass( command_buffer );
 
-        CHECK_VK( ::vkEndCommandBuffer( command_buffer_ ) );
+        CHECK_VK( ::vkEndCommandBuffer( command_buffer ) );
 
         auto const submit_info = VkSubmitInfo{
             .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -266,7 +229,7 @@ auto App::run( ) -> bool
             .pWaitSemaphores      = nullptr,
             .pWaitDstStageMask    = nullptr,
             .commandBufferCount   = 1,
-            .pCommandBuffers      = &command_buffer_,
+            .pCommandBuffers      = &command_buffer,
             .signalSemaphoreCount = 0,
             .pSignalSemaphores    = nullptr,
         };
@@ -276,7 +239,7 @@ auto App::run( ) -> bool
             setup_.graphics_queue,
             submit_count,
             &submit_info,
-            graphics_queue_fence_
+            graphics_queue_fence
         ) );
 
         if ( -1 == color_image_fd_ )

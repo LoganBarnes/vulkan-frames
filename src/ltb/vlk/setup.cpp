@@ -522,7 +522,7 @@ struct SurfaceFormatEquals
 } // namespace
 
 template <>
-auto initialize( SetupData< AppType::Headless >& setup, uint32 const physical_device_index ) -> bool
+auto initialize( uint32 const physical_device_index, SetupData< AppType::Headless >& setup ) -> bool
 {
     // Setup non-blocking console input
     if ( auto const fcntl_get_result = ::fcntl( STDIN_FILENO, F_SETFL, O_NONBLOCK );
@@ -587,7 +587,7 @@ auto initialize( SetupData< AppType::Headless >& setup, uint32 const physical_de
 }
 
 template <>
-auto initialize( SetupData< AppType::Windowed >& setup, uint32 const physical_device_index ) -> bool
+auto initialize( uint32 const physical_device_index, SetupData< AppType::Windowed >& setup ) -> bool
 {
     CHECK_TRUE( initialize_glfw( setup.glfw, setup.window ) );
 

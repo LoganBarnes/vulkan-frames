@@ -58,7 +58,7 @@ struct SetupData< AppType::Windowed >
 };
 
 template < AppType app_type >
-auto initialize( SetupData< app_type >& setup, uint32 const physical_device_index ) -> bool;
+auto initialize( uint32 physical_device_index, SetupData< app_type >& setup ) -> bool;
 
 template < AppType app_type >
 auto destroy( SetupData< app_type >& setup ) -> void;
