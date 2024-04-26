@@ -36,13 +36,13 @@ struct SetupData< AppType::Headless >
 
     // Common Vulkan objects
     VkInstance                          instance                        = { };
-    PFN_vkCreateDebugUtilsMessengerEXT  vkCreateDebugUtilsMessengerEXT  = nullptr;
     PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = nullptr;
     VkDebugUtilsMessengerEXT            debug_messenger                 = { };
     VkPhysicalDevice                    physical_device                 = { };
+    uint32                              graphics_queue_family_index     = { };
     VkDevice                            device                          = { };
     VkQueue                             graphics_queue                  = { };
-    VkCommandPool                       graphics_command_pool                    = { };
+    VkCommandPool                       graphics_command_pool           = { };
     VkRenderPass                        render_pass                     = { };
 };
 
@@ -55,15 +55,17 @@ struct SetupData< AppType::Windowed >
 
     // Common Vulkan objects
     VkInstance                          instance                        = { };
-    PFN_vkCreateDebugUtilsMessengerEXT  vkCreateDebugUtilsMessengerEXT  = nullptr;
     PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = nullptr;
     VkDebugUtilsMessengerEXT            debug_messenger                 = { };
     VkSurfaceKHR                        surface                         = { };
     VkPhysicalDevice                    physical_device                 = { };
+    uint32                              graphics_queue_family_index     = { };
+    uint32                              surface_queue_family_index      = { };
     VkDevice                            device                          = { };
     VkQueue                             graphics_queue                  = { };
     VkQueue                             surface_queue                   = { };
     VkCommandPool                       graphics_command_pool           = { };
+    VkSurfaceFormatKHR                  surface_format                  = { };
     VkRenderPass                        render_pass                     = { };
 };
 

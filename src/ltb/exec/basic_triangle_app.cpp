@@ -6,12 +6,10 @@
 #include "ltb/ltb_config.hpp"
 #include "ltb/utils/ignore.hpp"
 #include "ltb/utils/read_file.hpp"
-#include "ltb/utils/types.hpp"
+#include "ltb/vlk/check.hpp"
+#include "ltb/vlk/setup.hpp"
 
 // external
-#include <vulkan/vulkan.h>
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
 #include <spdlog/spdlog.h>
 
 // standard
@@ -21,17 +19,6 @@
 #include <ranges>
 #include <set>
 #include <vector>
-
-#define CHECK_VK( call )                                                                           \
-    do                                                                                             \
-    {                                                                                              \
-        if ( auto const result = ( call ); VK_SUCCESS != result )                                  \
-        {                                                                                          \
-            spdlog::error( "{} failed: {}", #call, std::to_string( result ) );                     \
-            return false;                                                                          \
-        }                                                                                          \
-    }                                                                                              \
-    while ( false )
 
 namespace ltb
 {
@@ -73,74 +60,6 @@ static_assert( alignof( ModelUniforms ) == uniform_alignment );
 static_assert( sizeof( DisplayUniforms ) == vec4_size );
 static_assert( alignof( DisplayUniforms ) == uniform_alignment );
 
-auto default_error_callback( int32 const error, char const* description ) -> void
-{
-    spdlog::error( "GLFW Error ({}): {}", error, description );
-}
-
-auto log_error_on_resize( GLFWwindow* const, int32 const width, int32 const height )
-{
-    spdlog::error( "Framebuffer resized: {}x{}", width, height );
-}
-
-VKAPI_ATTR VkBool32 default_debug_callback(
-    VkDebugUtilsMessageSeverityFlagBitsEXT const      message_severity,
-    VkDebugUtilsMessageTypeFlagsEXT                   message_type,
-    VkDebugUtilsMessengerCallbackDataEXT const* const callback_data,
-    void*                                             user_data
-)
-{
-    utils::ignore( message_type, user_data );
-
-    switch ( message_severity )
-    {
-        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
-            spdlog::debug( "Validation layer: {}", callback_data->pMessage );
-            break;
-        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
-            spdlog::info( "Validation layer: {}", callback_data->pMessage );
-            break;
-        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
-            spdlog::warn( "Validation layer: {}", callback_data->pMessage );
-            break;
-        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
-            spdlog::error( "Validation layer: {}", callback_data->pMessage );
-            break;
-        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_FLAG_BITS_MAX_ENUM_EXT:
-            break;
-    }
-
-    return false;
-}
-
-struct DeviceQueueCreateInfo
-{
-    std::vector< float32 >& queue_priorities;
-
-    auto operator( )( uint32 const queue_index ) const
-    {
-        auto create_info             = VkDeviceQueueCreateInfo{ };
-        create_info.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        create_info.pNext            = nullptr;
-        create_info.flags            = 0;
-        create_info.queueFamilyIndex = queue_index;
-        create_info.queueCount       = static_cast< uint32 >( queue_priorities.size( ) );
-        create_info.pQueuePriorities = queue_priorities.data( );
-        return create_info;
-    }
-};
-
-struct SurfaceFormatEquals
-{
-    VkSurfaceFormatKHR const& format;
-
-    auto operator( )( VkSurfaceFormatKHR const& surface_format ) const -> bool
-    {
-        return ( surface_format.format == format.format )
-            && ( surface_format.colorSpace == format.colorSpace );
-    }
-};
-
 } // namespace
 
 class App
@@ -158,25 +77,11 @@ public:
     auto run( ) -> bool;
 
 private:
-    // Glfw
-    int32       glfw_   = GLFW_FALSE;
-    GLFWwindow* window_ = { };
-
-    // Initialization
-    VkInstance                          instance_                       = { };
-    PFN_vkCreateDebugUtilsMessengerEXT  vkCreateDebugUtilsMessengerEXT  = nullptr;
-    PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = nullptr;
-    VkDebugUtilsMessengerEXT            debug_messenger_                = { };
-    VkSurfaceKHR                        surface_                        = { };
-    VkPhysicalDevice                    physical_device_                = { };
-    VkDevice                            device_                         = { };
-    VkQueue                             graphics_queue_                 = { };
-    VkQueue                             surface_queue_                  = { };
-    VkRenderPass                        render_pass_                    = { };
+    // Common setup objects
+    vlk::SetupData< vlk::AppType::Windowed > setup_ = { };
 
     // Pools
     VkDescriptorPool descriptor_pool_ = { };
-    VkCommandPool    command_pool_    = { };
 
     // Synchronization objects
     std::vector< VkCommandBuffer > command_buffers_            = { };
@@ -203,26 +108,26 @@ App::~App( )
 {
     if ( nullptr != pipeline_ )
     {
-        ::vkDestroyPipeline( device_, pipeline_, nullptr );
+        ::vkDestroyPipeline( setup_.device, pipeline_, nullptr );
         spdlog::debug( "vkDestroyPipeline()" );
     }
 
     if ( nullptr != pipeline_layout_ )
     {
-        ::vkDestroyPipelineLayout( device_, pipeline_layout_, nullptr );
+        ::vkDestroyPipelineLayout( setup_.device, pipeline_layout_, nullptr );
         spdlog::debug( "vkDestroyPipelineLayout()" );
     }
 
     for ( auto* const framebuffer : framebuffers_ )
     {
-        ::vkDestroyFramebuffer( device_, framebuffer, nullptr );
+        ::vkDestroyFramebuffer( setup_.device, framebuffer, nullptr );
     }
     spdlog::debug( "vkDestroyFramebuffer()x{}", framebuffers_.size( ) );
     framebuffers_.clear( );
 
     for ( auto* const image_view : swapchain_image_views_ )
     {
-        ::vkDestroyImageView( device_, image_view, nullptr );
+        ::vkDestroyImageView( setup_.device, image_view, nullptr );
     }
     spdlog::debug( "vkDestroyImageView()x{}", swapchain_image_views_.size( ) );
     swapchain_image_views_.clear( );
@@ -230,27 +135,27 @@ App::~App( )
     swapchain_images_.clear( );
     if ( nullptr != swapchain_ )
     {
-        ::vkDestroySwapchainKHR( device_, swapchain_, nullptr );
+        ::vkDestroySwapchainKHR( setup_.device, swapchain_, nullptr );
         spdlog::debug( "vkDestroySwapchainKHR()" );
     }
 
     for ( auto* const fence : graphics_queue_fences_ )
     {
-        ::vkDestroyFence( device_, fence, nullptr );
+        ::vkDestroyFence( setup_.device, fence, nullptr );
     }
     spdlog::debug( "vkDestroyFence()x{}", graphics_queue_fences_.size( ) );
     graphics_queue_fences_.clear( );
 
     for ( auto* const semaphore : render_finished_semaphores_ )
     {
-        ::vkDestroySemaphore( device_, semaphore, nullptr );
+        ::vkDestroySemaphore( setup_.device, semaphore, nullptr );
     }
     spdlog::debug( "vkDestroySemaphore()x{}", render_finished_semaphores_.size( ) );
     render_finished_semaphores_.clear( );
 
     for ( auto* const semaphore : image_available_semaphores_ )
     {
-        ::vkDestroySemaphore( device_, semaphore, nullptr );
+        ::vkDestroySemaphore( setup_.device, semaphore, nullptr );
     }
     spdlog::debug( "vkDestroySemaphore()x{}", image_available_semaphores_.size( ) );
     image_available_semaphores_.clear( );
@@ -258,472 +163,37 @@ App::~App( )
     if ( !command_buffers_.empty( ) )
     {
         ::vkFreeCommandBuffers(
-            device_,
-            command_pool_,
+            setup_.device,
+            setup_.graphics_command_pool,
             static_cast< uint32 >( command_buffers_.size( ) ),
             command_buffers_.data( )
         );
         spdlog::debug( "vkFreeCommandBuffers()" );
     }
 
-    if ( nullptr != command_pool_ )
-    {
-        ::vkDestroyCommandPool( device_, command_pool_, nullptr );
-        spdlog::debug( "vkDestroyCommandPool()" );
-    }
-
     if ( nullptr != descriptor_pool_ )
     {
-        ::vkDestroyDescriptorPool( device_, descriptor_pool_, nullptr );
+        ::vkDestroyDescriptorPool( setup_.device, descriptor_pool_, nullptr );
         spdlog::debug( "vkDestroyDescriptorPool()" );
     }
 
-    if ( nullptr != render_pass_ )
-    {
-        ::vkDestroyRenderPass( device_, render_pass_, nullptr );
-        spdlog::debug( "vkDestroyRenderPass()" );
-    }
-
-    if ( nullptr != device_ )
-    {
-        ::vkDestroyDevice( device_, nullptr );
-        spdlog::debug( "vkDestroyDevice()" );
-    }
-
-    if ( nullptr != surface_ )
-    {
-        ::vkDestroySurfaceKHR( instance_, surface_, nullptr );
-        spdlog::debug( "vkDestroySurfaceKHR()" );
-    }
-
-    if ( nullptr != debug_messenger_ )
-    {
-        vkDestroyDebugUtilsMessengerEXT( instance_, debug_messenger_, nullptr );
-        spdlog::debug( "vkDestroyDebugUtilsMessengerEXT()" );
-    }
-
-    if ( nullptr != instance_ )
-    {
-        ::vkDestroyInstance( instance_, nullptr );
-        spdlog::debug( "vkDestroyInstance()" );
-    }
-
-    if ( nullptr != window_ )
-    {
-        ::glfwDestroyWindow( window_ );
-        spdlog::debug( "glfwDestroyWindow()" );
-    }
-
-    if ( GLFW_TRUE == glfw_ )
-    {
-        ::glfwTerminate( );
-        spdlog::debug( "glfwTerminate()" );
-    }
+    vlk::destroy( setup_ );
 }
 
 auto App::initialize( uint32 const physical_device_index ) -> bool
 {
-    utils::ignore( ::glfwSetErrorCallback( default_error_callback ) );
-
-    if ( glfw_ = ::glfwInit( ); GLFW_FALSE == glfw_ )
-    {
-        spdlog::error( "glfwInit() failed" );
-        return false;
-    }
-    spdlog::debug( "glfwInit()" );
-
-    if ( GLFW_FALSE == ::glfwVulkanSupported( ) )
-    {
-        spdlog::error( "glfwVulkanSupported() failed" );
-        return false;
-    }
-    spdlog::debug( "glfwVulkanSupported()" );
-
-    auto* const primary_monitor = ::glfwGetPrimaryMonitor( );
-    if ( nullptr == primary_monitor )
-    {
-        spdlog::error( "glfwGetPrimaryMonitor() failed" );
-        return false;
-    }
-    auto const* const video_mode = ::glfwGetVideoMode( primary_monitor );
-    if ( nullptr == video_mode )
-    {
-        spdlog::error( "glfwGetVideoMode() failed" );
-        return false;
-    }
-
-    ::glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
-    ::glfwWindowHint( GLFW_RED_BITS, video_mode->redBits );
-    ::glfwWindowHint( GLFW_GREEN_BITS, video_mode->greenBits );
-    ::glfwWindowHint( GLFW_BLUE_BITS, video_mode->blueBits );
-    ::glfwWindowHint( GLFW_REFRESH_RATE, video_mode->refreshRate );
-    ::glfwWindowHint( GLFW_RESIZABLE, GLFW_FALSE );
-
-    if ( window_ = ::glfwCreateWindow(
-             video_mode->width,
-             video_mode->height,
-             "Vulkan Application",
-#if defined( __APPLE__ )
-             // Passing the primary monitor doesn't work on macOS?
-             nullptr,
-#else
-             primary_monitor,
-#endif
-             nullptr
-         );
-         nullptr == window_ )
-    {
-        spdlog::error( "glfwCreateWindow() failed" );
-        return false;
-    }
-    spdlog::debug( "glfwCreateWindow()" );
-
-    // Log when the window is resized (this should never happen).
-    utils::ignore( ::glfwSetFramebufferSizeCallback( window_, log_error_on_resize ) );
-
-    auto extension_names = std::vector{
-#if defined( __APPLE__ )
-        "VK_KHR_portability_enumeration",
-#endif
-#if !defined( NDEBUG )
-        VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
-#endif
-    };
-
-    auto              instance_extension_count = uint32_t{ 0 };
-    auto const* const glfw_extensions
-        = ::glfwGetRequiredInstanceExtensions( &instance_extension_count );
-
-    utils::ignore( extension_names.insert(
-        extension_names.end( ),
-        glfw_extensions,
-        glfw_extensions + instance_extension_count
-    ) );
-
-    auto constexpr layer_names = std::array{
-#if !defined( LTB_DRIVEOS_DEVICE ) && !defined( NDEBUG ) && !defined( WIN32 )
-        "VK_LAYER_KHRONOS_validation",
-#endif
-    };
-
-    auto constexpr flags = VkInstanceCreateFlags{
-#if defined( __APPLE__ )
-        VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR
-#endif
-    };
-
-    auto const application_info = VkApplicationInfo{
-        .sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pNext              = nullptr,
-        .pApplicationName   = "Vulkan app",
-        .applicationVersion = VK_MAKE_API_VERSION( 0, 1, 0, 0 ),
-        .pEngineName        = "No Engine",
-        .engineVersion      = VK_MAKE_API_VERSION( 0, 1, 0, 0 ),
-        .apiVersion         = VK_API_VERSION_1_3,
-    };
-
-    auto const debug_create_info = VkDebugUtilsMessengerCreateInfoEXT{
-        .sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-        .pNext           = nullptr,
-        .flags           = 0U,
-        .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
-                         | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
-                         | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-        .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
-                     | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
-                     | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
-#if !defined( LTB_DRIVEOS_DEVICE ) && !defined( NDEBUG ) && !defined( WIN32 )
-        .pfnUserCallback = default_debug_callback,
-#else
-        .pfnUserCallback = nullptr,
-#endif
-        .pUserData = nullptr,
-    };
-
-    auto const create_info = VkInstanceCreateInfo{
-        .sType               = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        .pNext               = ( debug_create_info.pfnUserCallback ? &debug_create_info : nullptr ),
-        .flags               = flags,
-        .pApplicationInfo    = &application_info,
-        .enabledLayerCount   = static_cast< uint32 >( layer_names.size( ) ),
-        .ppEnabledLayerNames = layer_names.data( ),
-        .enabledExtensionCount   = static_cast< uint32 >( extension_names.size( ) ),
-        .ppEnabledExtensionNames = extension_names.data( ),
-    };
-
-    CHECK_VK( ::vkCreateInstance( &create_info, nullptr, &instance_ ) );
-    spdlog::debug( "vkCreateInstance()" );
-
-    if ( nullptr != debug_create_info.pfnUserCallback )
-    {
-        vkCreateDebugUtilsMessengerEXT = reinterpret_cast< PFN_vkCreateDebugUtilsMessengerEXT >(
-            ::vkGetInstanceProcAddr( instance_, "vkCreateDebugUtilsMessengerEXT" )
-        );
-
-        vkDestroyDebugUtilsMessengerEXT = reinterpret_cast< PFN_vkDestroyDebugUtilsMessengerEXT >(
-            ::vkGetInstanceProcAddr( instance_, "vkDestroyDebugUtilsMessengerEXT" )
-        );
-
-        if ( ( nullptr == vkCreateDebugUtilsMessengerEXT )
-             || ( nullptr == vkDestroyDebugUtilsMessengerEXT ) )
-        {
-            spdlog::error( "vkGetInstanceProcAddr() failed" );
-            return false;
-        }
-
-        CHECK_VK( vkCreateDebugUtilsMessengerEXT(
-            instance_,
-            &debug_create_info,
-            nullptr,
-            &debug_messenger_
-        ) );
-        spdlog::debug( "vkCreateDebugUtilsMessengerEXT()" );
-    }
-
-    CHECK_VK( ::glfwCreateWindowSurface( instance_, window_, nullptr, &surface_ ) );
-    spdlog::debug( "glfwCreateWindowSurface()" );
-
-    auto physical_device_count = uint32{ 0 };
-    CHECK_VK( ::vkEnumeratePhysicalDevices( instance_, &physical_device_count, nullptr ) );
-    auto physical_devices = std::vector< VkPhysicalDevice >( physical_device_count );
-    CHECK_VK(
-        ::vkEnumeratePhysicalDevices( instance_, &physical_device_count, physical_devices.data( ) )
-    );
-
-    for ( auto i = uint32{ 0 }; i < physical_device_count; ++i )
-    {
-        auto properties = VkPhysicalDeviceProperties{ };
-        ::vkGetPhysicalDeviceProperties( physical_devices[ i ], &properties );
-        spdlog::info( "Device[{}]: {}", i, properties.deviceName );
-    }
-
-    if ( physical_device_index >= physical_device_count )
-    {
-        spdlog::error( "Invalid physical device index: {}", physical_device_index );
-        return false;
-    }
-
-    physical_device_ = physical_devices[ physical_device_index ];
-
-    auto physical_device_properties = VkPhysicalDeviceProperties{ };
-    ::vkGetPhysicalDeviceProperties( physical_device_, &physical_device_properties );
-    spdlog::info(
-        "Using Device[{}]: {}",
-        physical_device_index,
-        physical_device_properties.deviceName
-    );
-
-    auto queue_family_count = uint32{ 0 };
-    ::vkGetPhysicalDeviceQueueFamilyProperties( physical_device_, &queue_family_count, nullptr );
-    auto queue_families = std::vector< VkQueueFamilyProperties >( queue_family_count );
-    ::vkGetPhysicalDeviceQueueFamilyProperties(
-        physical_device_,
-        &queue_family_count,
-        queue_families.data( )
-    );
-
-    auto graphics_queue_family_index = std::optional< uint32 >{ };
-    auto surface_queue_family_index  = std::optional< uint32 >{ };
-
-    for ( auto i = uint32{ 0 }; i < queue_family_count; ++i )
-    {
-        if ( ( !graphics_queue_family_index ) || ( !surface_queue_family_index ) )
-        {
-            if ( 0 != ( queue_families[ i ].queueFlags & VK_QUEUE_GRAPHICS_BIT ) )
-            {
-                graphics_queue_family_index = i;
-            }
-
-            auto surface_support = VkBool32{ false };
-            CHECK_VK( ::vkGetPhysicalDeviceSurfaceSupportKHR(
-                physical_device_,
-                i,
-                surface_,
-                &surface_support
-            ) );
-
-            if ( VK_TRUE == surface_support )
-            {
-                surface_queue_family_index = i;
-            }
-        }
-    }
-
-    if ( std::nullopt == graphics_queue_family_index )
-    {
-        spdlog::error( "No graphics queue family found" );
-        return false;
-    }
-    if ( std::nullopt == surface_queue_family_index )
-    {
-        spdlog::error( "No surface queue family found" );
-        return false;
-    }
-
-    auto const unique_queue_indices = std::set{
-        graphics_queue_family_index.value( ),
-        surface_queue_family_index.value( ),
-    };
-
-    auto queue_priorities   = std::vector{ 1.0F };
-    auto queue_create_infos = std::vector< VkDeviceQueueCreateInfo >{ };
-
-    utils::ignore( std::ranges::transform(
-        unique_queue_indices,
-        std::back_inserter( queue_create_infos ),
-        DeviceQueueCreateInfo{ queue_priorities }
-    ) );
-
-    auto const device_extension_names = std::vector{
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
-        VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
-#if defined( __APPLE__ )
-        "VK_KHR_portability_subset",
-#endif
-    };
-
-    auto device_features              = VkPhysicalDeviceFeatures{ };
-    device_features.samplerAnisotropy = VK_TRUE;
-
-    auto const device_create_info = VkDeviceCreateInfo{
-        .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext                   = nullptr,
-        .flags                   = 0U,
-        .queueCreateInfoCount    = static_cast< uint32 >( queue_create_infos.size( ) ),
-        .pQueueCreateInfos       = queue_create_infos.data( ),
-        .enabledLayerCount       = 0U,
-        .ppEnabledLayerNames     = nullptr,
-        .enabledExtensionCount   = static_cast< uint32 >( device_extension_names.size( ) ),
-        .ppEnabledExtensionNames = device_extension_names.data( ),
-        .pEnabledFeatures        = &device_features,
-    };
-    CHECK_VK( ::vkCreateDevice( physical_device_, &device_create_info, nullptr, &device_ ) );
-    spdlog::debug( "vkCreateDevice()" );
-
-    auto constexpr graphics_queue_index = uint32{ 0 };
-    ::vkGetDeviceQueue(
-        device_,
-        graphics_queue_family_index.value( ),
-        graphics_queue_index,
-        &graphics_queue_
-    );
-
-    auto constexpr surface_queue_index = uint32{ 0 };
-    ::vkGetDeviceQueue(
-        device_,
-        surface_queue_family_index.value( ),
-        surface_queue_index,
-        &surface_queue_
-    );
-
-    auto physical_device_formats_count = uint32{ 0 };
-    CHECK_VK( ::vkGetPhysicalDeviceSurfaceFormatsKHR(
-        physical_device_,
-        surface_,
-        &physical_device_formats_count,
-        nullptr
-    ) );
-    auto surface_formats = std::vector< VkSurfaceFormatKHR >( physical_device_formats_count );
-    CHECK_VK( ::vkGetPhysicalDeviceSurfaceFormatsKHR(
-        physical_device_,
-        surface_,
-        &physical_device_formats_count,
-        surface_formats.data( )
-    ) );
-
-    auto preferred_surface_format = VkSurfaceFormatKHR{
-        .format     = VK_FORMAT_B8G8R8A8_SRGB,
-        .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
-    };
-
-    if ( !std::ranges::any_of( surface_formats, SurfaceFormatEquals{ preferred_surface_format } ) )
-    {
-        preferred_surface_format = surface_formats[ 0U ];
-    }
-
-    auto const attachments = std::vector{
-        VkAttachmentDescription{
-            .flags          = 0U,
-            .format         = preferred_surface_format.format,
-            .samples        = VK_SAMPLE_COUNT_1_BIT,
-            .loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
-            .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
-            .finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        },
-    };
-
-    auto const color_attachment_refs = std::vector{
-        VkAttachmentReference{
-            .attachment = 0U,
-            .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        },
-    };
-
-    auto const subpasses = std::vector{
-        VkSubpassDescription{
-            .flags                   = 0U,
-            .pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS,
-            .inputAttachmentCount    = 0U,
-            .pInputAttachments       = nullptr,
-            .colorAttachmentCount    = static_cast< uint32 >( color_attachment_refs.size( ) ),
-            .pColorAttachments       = color_attachment_refs.data( ),
-            .pResolveAttachments     = nullptr,
-            .pDepthStencilAttachment = nullptr,
-            .preserveAttachmentCount = 0U,
-            .pPreserveAttachments    = nullptr,
-        },
-    };
-
-    auto const subpass_dependencies = std::vector{
-        VkSubpassDependency{
-            .srcSubpass      = VK_SUBPASS_EXTERNAL,
-            .dstSubpass      = 0U,
-            .srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .srcAccessMask   = 0U,
-            .dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            .dependencyFlags = 0U,
-        },
-    };
-
-    auto const render_pass_create_info = VkRenderPassCreateInfo{
-        .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .pNext           = nullptr,
-        .flags           = 0U,
-        .attachmentCount = static_cast< uint32 >( attachments.size( ) ),
-        .pAttachments    = attachments.data( ),
-        .subpassCount    = static_cast< uint32 >( subpasses.size( ) ),
-        .pSubpasses      = subpasses.data( ),
-        .dependencyCount = static_cast< uint32 >( subpass_dependencies.size( ) ),
-        .pDependencies   = subpass_dependencies.data( ),
-    };
-
-    CHECK_VK( ::vkCreateRenderPass( device_, &render_pass_create_info, nullptr, &render_pass_ ) );
-    spdlog::debug( "vkCreateRenderPass()" );
-
-    auto const command_pool_create_info = VkCommandPoolCreateInfo{
-        .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .pNext            = nullptr,
-        .flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = graphics_queue_family_index.value( ),
-    };
-    CHECK_VK( ::vkCreateCommandPool( device_, &command_pool_create_info, nullptr, &command_pool_ )
-    );
-    spdlog::debug( "vkCreateCommandPool()" );
+    CHECK_TRUE( vlk::initialize( setup_, physical_device_index ) );
 
     auto const cmd_buf_alloc_info = VkCommandBufferAllocateInfo{
         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .pNext              = nullptr,
-        .commandPool        = command_pool_,
+        .commandPool        = setup_.graphics_command_pool,
         .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = max_frames_in_flight,
     };
     command_buffers_.resize( cmd_buf_alloc_info.commandBufferCount );
-    CHECK_VK( ::vkAllocateCommandBuffers( device_, &cmd_buf_alloc_info, command_buffers_.data( ) )
+    CHECK_VK(
+        ::vkAllocateCommandBuffers( setup_.device, &cmd_buf_alloc_info, command_buffers_.data( ) )
     );
     spdlog::debug( "vkAllocateCommandBuffers()" );
 
@@ -739,13 +209,13 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
     for ( auto i = 0U; i < max_frames_in_flight; ++i )
     {
         CHECK_VK( ::vkCreateSemaphore(
-            device_,
+            setup_.device,
             &semaphore_create_info,
             nullptr,
             image_available_semaphores_.data( ) + i
         ) );
         CHECK_VK( ::vkCreateSemaphore(
-            device_,
+            setup_.device,
             &semaphore_create_info,
             nullptr,
             render_finished_semaphores_.data( ) + i
@@ -764,7 +234,7 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
     for ( auto i = 0U; i < max_frames_in_flight; ++i )
     {
         CHECK_VK( ::vkCreateFence(
-            device_,
+            setup_.device,
             &fence_create_info,
             nullptr,
             graphics_queue_fences_.data( ) + i
@@ -774,12 +244,12 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
 
     auto framebuffer_width  = int32{ 0 };
     auto framebuffer_height = int32{ 0 };
-    ::glfwGetFramebufferSize( window_, &framebuffer_width, &framebuffer_height );
+    ::glfwGetFramebufferSize( setup_.window, &framebuffer_width, &framebuffer_height );
 
     auto surface_capabilities = VkSurfaceCapabilitiesKHR{ };
     CHECK_VK( ::vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-        physical_device_,
-        surface_,
+        setup_.physical_device,
+        setup_.surface,
         &surface_capabilities
     ) );
 
@@ -805,6 +275,11 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
         min_image_count = surface_capabilities.maxImageCount;
     }
 
+    auto const unique_queue_indices = std::set{
+        setup_.graphics_queue_family_index,
+        setup_.surface_queue_family_index,
+    };
+
     auto const queue_family_indices
         = std::vector< uint32 >( unique_queue_indices.begin( ), unique_queue_indices.end( ) );
 
@@ -815,10 +290,10 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
         .sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .pNext            = nullptr,
         .flags            = 0U,
-        .surface          = surface_,
+        .surface          = setup_.surface,
         .minImageCount    = min_image_count,
-        .imageFormat      = preferred_surface_format.format,
-        .imageColorSpace  = preferred_surface_format.colorSpace,
+        .imageFormat      = setup_.surface_format.format,
+        .imageColorSpace  = setup_.surface_format.colorSpace,
         .imageExtent      = framebuffer_size_,
         .imageArrayLayers = 1U,
         .imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
@@ -833,14 +308,17 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
         .oldSwapchain          = nullptr,
     };
 
-    CHECK_VK( ::vkCreateSwapchainKHR( device_, &swapchain_create_info, nullptr, &swapchain_ ) );
+    CHECK_VK( ::vkCreateSwapchainKHR( setup_.device, &swapchain_create_info, nullptr, &swapchain_ )
+    );
     spdlog::debug( "vkCreateSwapchainKHR()" );
 
     auto swapchain_image_count = uint32{ 0 };
-    CHECK_VK( ::vkGetSwapchainImagesKHR( device_, swapchain_, &swapchain_image_count, nullptr ) );
+    CHECK_VK(
+        ::vkGetSwapchainImagesKHR( setup_.device, swapchain_, &swapchain_image_count, nullptr )
+    );
     swapchain_images_.resize( swapchain_image_count );
     CHECK_VK( ::vkGetSwapchainImagesKHR(
-        device_,
+        setup_.device,
         swapchain_,
         &swapchain_image_count,
         swapchain_images_.data( )
@@ -856,7 +334,7 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
             .flags            = 0U,
             .image            = swapchain_images_[ i ],
             .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-            .format           = preferred_surface_format.format,
+            .format           = setup_.surface_format.format,
             .components       = VkComponentMapping{
                 .r = VK_COMPONENT_SWIZZLE_IDENTITY,
                 .g = VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -872,7 +350,7 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
             },
         };
         CHECK_VK( ::vkCreateImageView(
-            device_,
+            setup_.device,
             &image_view_create_info,
             nullptr,
             swapchain_image_views_.data( ) + i
@@ -887,7 +365,7 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
             .sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
             .pNext           = nullptr,
             .flags           = 0U,
-            .renderPass      = render_pass_,
+            .renderPass      = setup_.render_pass,
             .attachmentCount = 1U,
             .pAttachments    = swapchain_image_views_.data( ) + i,
             .width           = framebuffer_size_.width,
@@ -895,7 +373,7 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
             .layers          = 1U,
         };
         CHECK_VK( ::vkCreateFramebuffer(
-            device_,
+            setup_.device,
             &framebuffer_create_info,
             nullptr,
             framebuffers_.data( ) + i
@@ -925,7 +403,8 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
         .pushConstantRangeCount = static_cast< uint32 >( push_constant_ranges.size( ) ),
         .pPushConstantRanges    = push_constant_ranges.data( ),
     };
-    CHECK_VK( ::vkCreatePipelineLayout( device_, &pipeline_layout_info, nullptr, &pipeline_layout_ )
+    CHECK_VK(
+        ::vkCreatePipelineLayout( setup_.device, &pipeline_layout_info, nullptr, &pipeline_layout_ )
     );
     spdlog::debug( "vkCreatePipelineLayout()" );
 
@@ -949,7 +428,7 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
     };
     auto* vert_shader_module = VkShaderModule{ };
     CHECK_VK( ::vkCreateShaderModule(
-        device_,
+        setup_.device,
         &vert_shader_module_create_info,
         nullptr,
         &vert_shader_module
@@ -964,7 +443,7 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
     };
     auto* frag_shader_module = VkShaderModule{ };
     CHECK_VK( ::vkCreateShaderModule(
-        device_,
+        setup_.device,
         &frag_shader_module_create_info,
         nullptr,
         &frag_shader_module
@@ -1095,13 +574,13 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
         .pColorBlendState    = &color_blending,
         .pDynamicState       = &dynamic_state,
         .layout              = pipeline_layout_,
-        .renderPass          = render_pass_,
+        .renderPass          = setup_.render_pass,
         .subpass             = 0,
         .basePipelineHandle  = nullptr,
         .basePipelineIndex   = -1,
     };
     CHECK_VK( ::vkCreateGraphicsPipelines(
-        device_,
+        setup_.device,
         nullptr,
         1,
         &pipeline_create_info,
@@ -1110,8 +589,8 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
     ) );
     spdlog::debug( "vkCreateGraphicsPipelines()" );
 
-    ::vkDestroyShaderModule( device_, frag_shader_module, nullptr );
-    ::vkDestroyShaderModule( device_, vert_shader_module, nullptr );
+    ::vkDestroyShaderModule( setup_.device, frag_shader_module, nullptr );
+    ::vkDestroyShaderModule( setup_.device, vert_shader_module, nullptr );
 
     return true;
 }
@@ -1143,7 +622,7 @@ auto App::run( ) -> bool
         auto const graphics_fences = std::array{ graphics_queue_fence };
 
         CHECK_VK( ::vkWaitForFences(
-            device_,
+            setup_.device,
             static_cast< uint32 >( graphics_fences.size( ) ),
             graphics_fences.data( ),
             VK_TRUE,
@@ -1154,7 +633,7 @@ auto App::run( ) -> bool
 
         auto swapchain_image_index = uint32{ 0 };
         CHECK_VK( ::vkAcquireNextImageKHR(
-            device_,
+            setup_.device,
             swapchain_,
             max_possible_timeout,
             image_available_semaphore,
@@ -1164,7 +643,7 @@ auto App::run( ) -> bool
         auto* const framebuffer = framebuffers_[ swapchain_image_index ];
 
         CHECK_VK( ::vkResetFences(
-            device_,
+            setup_.device,
             static_cast< uint32 >( graphics_fences.size( ) ),
             graphics_fences.data( )
         ) );
@@ -1189,7 +668,7 @@ auto App::run( ) -> bool
         auto const render_pass_info = VkRenderPassBeginInfo{
             .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
             .pNext           = nullptr,
-            .renderPass      = render_pass_,
+            .renderPass      = setup_.render_pass,
             .framebuffer     = framebuffer,
             .renderArea      = VkRect2D{
                  .offset = VkOffset2D{ .x = 0, .y = 0 },
@@ -1271,9 +750,12 @@ auto App::run( ) -> bool
 
         // Use the fence to block future CPU code that also references this fence.
         auto constexpr submit_count = 1;
-        CHECK_VK(
-            ::vkQueueSubmit( graphics_queue_, submit_count, &submit_info, graphics_queue_fence )
-        );
+        CHECK_VK( ::vkQueueSubmit(
+            setup_.graphics_queue,
+            submit_count,
+            &submit_info,
+            graphics_queue_fence
+        ) );
 
         auto const present_info = VkPresentInfoKHR{
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -1286,16 +768,16 @@ auto App::run( ) -> bool
             .pImageIndices      = &swapchain_image_index,
             .pResults           = nullptr,
         };
-        CHECK_VK( ::vkQueuePresentKHR( surface_queue_, &present_info ) );
+        CHECK_VK( ::vkQueuePresentKHR( setup_.surface_queue, &present_info ) );
 
         current_frame_ = ( current_frame_ + 1U ) % max_frames_in_flight;
 
         // This GLFW_KEY_ESCAPE bit shouldn't exist in a final product.
-        should_exit = ( GLFW_TRUE == ::glfwWindowShouldClose( window_ ) )
-                   || ( GLFW_PRESS == ::glfwGetKey( window_, GLFW_KEY_ESCAPE ) );
+        should_exit = ( GLFW_TRUE == ::glfwWindowShouldClose( setup_.window ) )
+                   || ( GLFW_PRESS == ::glfwGetKey( setup_.window, GLFW_KEY_ESCAPE ) );
     }
 
-    CHECK_VK( ::vkDeviceWaitIdle( device_ ) );
+    CHECK_VK( ::vkDeviceWaitIdle( setup_.device ) );
 
     spdlog::info( "Exiting..." );
     return true;

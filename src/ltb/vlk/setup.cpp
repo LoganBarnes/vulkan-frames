@@ -126,7 +126,6 @@ VKAPI_ATTR VkBool32 default_debug_callback(
 
 auto initialize_instance(
     VkInstance&                          instance,
-    PFN_vkCreateDebugUtilsMessengerEXT&  vkCreateDebugUtilsMessengerEXT,
     PFN_vkDestroyDebugUtilsMessengerEXT& vkDestroyDebugUtilsMessengerEXT,
     VkDebugUtilsMessengerEXT&            debug_messenger,
     std::vector< char const* > const&    extra_extension_names
@@ -193,9 +192,10 @@ auto initialize_instance(
 
     if ( nullptr != debug_create_info.pfnUserCallback )
     {
-        vkCreateDebugUtilsMessengerEXT = reinterpret_cast< PFN_vkCreateDebugUtilsMessengerEXT >(
-            ::vkGetInstanceProcAddr( instance, "vkCreateDebugUtilsMessengerEXT" )
-        );
+        auto const vkCreateDebugUtilsMessengerEXT
+            = reinterpret_cast< PFN_vkCreateDebugUtilsMessengerEXT >(
+                ::vkGetInstanceProcAddr( instance, "vkCreateDebugUtilsMessengerEXT" )
+            );
 
         vkDestroyDebugUtilsMessengerEXT = reinterpret_cast< PFN_vkDestroyDebugUtilsMessengerEXT >(
             ::vkGetInstanceProcAddr( instance, "vkDestroyDebugUtilsMessengerEXT" )
@@ -237,27 +237,13 @@ struct DeviceQueueCreateInfo
     }
 };
 
-struct SurfaceFormatEquals
-{
-    VkSurfaceFormatKHR const& format;
-
-    auto operator( )( VkSurfaceFormatKHR const& surface_format ) const -> bool
-    {
-        return ( surface_format.format == format.format )
-            && ( surface_format.colorSpace == format.colorSpace );
-    }
-};
-
-auto initialize_device(
-    uint32 const                      physical_device_index,
-    std::vector< char const* > const& extra_device_extension_names,
-    VkInstance const&                 instance,
-    VkPhysicalDevice&                 physical_device,
-    VkDevice&                         device,
-    VkQueue&                          graphics_queue,
-    VkCommandPool&                    graphics_command_pool,
-    VkQueue*                          optional_surface_queue,
-    VkSurfaceKHR const&               optional_surface
+auto initialize_physical_device(
+    uint32 const        physical_device_index,
+    VkInstance const&   instance,
+    VkPhysicalDevice&   physical_device,
+    uint32&             graphics_queue_family_index_out,
+    VkSurfaceKHR const& optional_surface,
+    uint32*             optional_surface_queue_family_index_out
 )
 {
     auto physical_device_count = uint32{ 0 };
@@ -335,16 +321,46 @@ auto initialize_device(
         spdlog::error( "No graphics queue family found" );
         return false;
     }
-    if ( ( nullptr != optional_surface ) && ( std::nullopt == surface_queue_family_index ) )
+    else
     {
-        spdlog::error( "No surface queue family found" );
-        return false;
+        graphics_queue_family_index_out = graphics_queue_family_index.value( );
     }
 
-    auto const unique_queue_indices = std::set{
-        graphics_queue_family_index.value( ),
-        surface_queue_family_index.value( ),
+    if ( ( nullptr != optional_surface ) )
+    {
+        if ( std::nullopt == surface_queue_family_index )
+        {
+            spdlog::error( "No surface queue family found" );
+            return false;
+        }
+        else
+        {
+            *optional_surface_queue_family_index_out = surface_queue_family_index.value( );
+        }
+    }
+
+    return true;
+}
+
+auto initialize_device(
+    std::vector< char const* > const& extra_device_extension_names,
+    VkPhysicalDevice const&           physical_device,
+    uint32                            graphics_queue_family_index,
+    VkDevice&                         device,
+    VkQueue&                          graphics_queue,
+    VkCommandPool&                    graphics_command_pool,
+    std::optional< uint32 > const&    optional_surface_queue_family_index,
+    VkQueue*                          optional_surface_queue
+)
+{
+    auto unique_queue_indices = std::set{
+        graphics_queue_family_index,
     };
+    if ( optional_surface_queue_family_index.has_value( ) )
+    {
+        utils::ignore( unique_queue_indices.insert( optional_surface_queue_family_index.value( ) )
+        );
+    }
 
     auto queue_priorities   = std::vector{ 1.0F };
     auto queue_create_infos = std::vector< VkDeviceQueueCreateInfo >{ };
@@ -386,17 +402,17 @@ auto initialize_device(
     auto constexpr graphics_queue_index = uint32{ 0 };
     ::vkGetDeviceQueue(
         device,
-        graphics_queue_family_index.value( ),
+        graphics_queue_family_index,
         graphics_queue_index,
         &graphics_queue
     );
 
-    if ( surface_queue_family_index )
+    if ( optional_surface_queue_family_index.has_value( ) )
     {
         auto constexpr surface_queue_index = uint32{ 0 };
         ::vkGetDeviceQueue(
             device,
-            surface_queue_family_index.value( ),
+            optional_surface_queue_family_index.value( ),
             surface_queue_index,
             optional_surface_queue
         );
@@ -406,7 +422,7 @@ auto initialize_device(
         .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .pNext            = nullptr,
         .flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = graphics_queue_family_index.value( ),
+        .queueFamilyIndex = graphics_queue_family_index,
     };
     CHECK_VK(
         ::vkCreateCommandPool( device, &command_pool_create_info, nullptr, &graphics_command_pool )
@@ -488,6 +504,17 @@ auto initialize_render_pass(
     return true;
 }
 
+struct SurfaceFormatEquals
+{
+    VkSurfaceFormatKHR const& format;
+
+    auto operator( )( VkSurfaceFormatKHR const& surface_format ) const -> bool
+    {
+        return ( surface_format.format == format.format )
+            && ( surface_format.colorSpace == format.colorSpace );
+    }
+};
+
 } // namespace
 
 template <>
@@ -496,25 +523,34 @@ auto initialize( SetupData< AppType::Headless >& setup, uint32 const physical_de
     auto const extra_extension_names = std::vector< char const* >{ };
     CHECK_TRUE( initialize_instance(
         setup.instance,
-        setup.vkCreateDebugUtilsMessengerEXT,
         setup.vkDestroyDebugUtilsMessengerEXT,
         setup.debug_messenger,
         extra_extension_names
     ) );
 
-    auto const extra_device_extension_names = std::vector< char const* >{ };
-    auto const optional_surface_queue       = nullptr;
-    auto const optional_surface             = nullptr;
-    CHECK_TRUE( initialize_device(
+    auto const surface                    = nullptr;
+    auto const surface_queue_family_index = nullptr;
+    CHECK_TRUE( initialize_physical_device(
         physical_device_index,
-        extra_device_extension_names,
         setup.instance,
         setup.physical_device,
+        setup.graphics_queue_family_index,
+        surface,
+        surface_queue_family_index
+    ) );
+
+    auto const extra_device_extension_names        = std::vector< char const* >{ };
+    auto const optional_surface_queue_family_index = std::optional< uint32 >{ };
+    auto const surface_queue                       = nullptr;
+    CHECK_TRUE( initialize_device(
+        extra_extension_names,
+        setup.physical_device,
+        setup.graphics_queue_family_index,
         setup.device,
         setup.graphics_queue,
         setup.graphics_command_pool,
-        optional_surface_queue,
-        optional_surface
+        optional_surface_queue_family_index,
+        surface_queue
     ) );
 
     auto constexpr color_format = VK_FORMAT_B8G8R8A8_SRGB;
@@ -538,7 +574,6 @@ auto initialize( SetupData< AppType::Windowed >& setup, uint32 const physical_de
 
     CHECK_TRUE( initialize_instance(
         setup.instance,
-        setup.vkCreateDebugUtilsMessengerEXT,
         setup.vkDestroyDebugUtilsMessengerEXT,
         setup.debug_messenger,
         extra_extension_names
@@ -550,16 +585,24 @@ auto initialize( SetupData< AppType::Windowed >& setup, uint32 const physical_de
     auto const extra_device_extension_names = std::vector< char const* >{
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     };
-    CHECK_TRUE( initialize_device(
+    CHECK_TRUE( initialize_physical_device(
         physical_device_index,
-        extra_device_extension_names,
         setup.instance,
         setup.physical_device,
+        setup.graphics_queue_family_index,
+        setup.surface,
+        &setup.surface_queue_family_index
+    ) );
+
+    CHECK_TRUE( initialize_device(
+        extra_device_extension_names,
+        setup.physical_device,
+        setup.graphics_queue_family_index,
         setup.device,
         setup.graphics_queue,
         setup.graphics_command_pool,
-        &setup.surface_queue,
-        setup.surface
+        setup.surface_queue_family_index,
+        &setup.surface_queue
     ) );
 
     auto physical_device_formats_count = uint32{ 0 };
@@ -577,18 +620,18 @@ auto initialize( SetupData< AppType::Windowed >& setup, uint32 const physical_de
         surface_formats.data( )
     ) );
 
-    auto preferred_surface_format = VkSurfaceFormatKHR{
+    setup.surface_format = VkSurfaceFormatKHR{
         .format     = VK_FORMAT_B8G8R8A8_SRGB,
         .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
     };
 
-    if ( !std::ranges::any_of( surface_formats, SurfaceFormatEquals{ preferred_surface_format } ) )
+    if ( !std::ranges::any_of( surface_formats, SurfaceFormatEquals{ setup.surface_format } ) )
     {
-        preferred_surface_format = surface_formats[ 0U ];
+        setup.surface_format = surface_formats[ 0U ];
     }
 
     CHECK_TRUE(
-        initialize_render_pass( preferred_surface_format.format, setup.device, setup.render_pass )
+        initialize_render_pass( setup.surface_format.format, setup.device, setup.render_pass )
     );
 
     return true;
@@ -601,6 +644,12 @@ auto destroy( SetupData< app_type >& setup ) -> void
     {
         ::vkDestroyRenderPass( setup.device, setup.render_pass, nullptr );
         spdlog::debug( "vkDestroyRenderPass()" );
+    }
+
+    if ( nullptr != setup.graphics_command_pool )
+    {
+        ::vkDestroyCommandPool( setup.device, setup.graphics_command_pool, nullptr );
+        spdlog::debug( "vkDestroyCommandPool()" );
     }
 
     if ( nullptr != setup.device )
@@ -620,7 +669,7 @@ auto destroy( SetupData< app_type >& setup ) -> void
 
     if ( nullptr != setup.debug_messenger )
     {
-        vkDestroyDebugUtilsMessengerEXT( setup.instance, setup.debug_messenger, nullptr );
+        setup.vkDestroyDebugUtilsMessengerEXT( setup.instance, setup.debug_messenger, nullptr );
         spdlog::debug( "vkDestroyDebugUtilsMessengerEXT()" );
     }
 
