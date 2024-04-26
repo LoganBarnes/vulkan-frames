@@ -20,7 +20,8 @@ enum class AppType
     Windowed
 };
 
-enum class ExternalMemory {
+enum class ExternalMemory
+{
     No,
     Yes
 };

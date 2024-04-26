@@ -22,7 +22,7 @@ void update_color(in sampler2D tex)
 void main()
 {
     out_color = vec4(texture_coordinates, 1.0F, 1.0F);
-//    out_color = vec4(0.0F, 0.0F, 0.0F, 1.0F);
+    //    out_color = vec4(0.0F, 0.0F, 0.0F, 1.0F);
 
     update_color(tex_sampler1);
     //    update_color(tex_sampler2);

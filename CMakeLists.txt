@@ -12,7 +12,7 @@ set(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
 
 if (NOT UNIX OR APPLE)
   message(FATAL_ERROR "This project only supports Linux")
-endif()
+endif ()
 
 # ##############################################################################
 # External Packages

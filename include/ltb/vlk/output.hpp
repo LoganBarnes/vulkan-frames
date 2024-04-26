@@ -37,10 +37,10 @@ struct OutputData< AppType::Windowed >
 };
 
 auto initialize(
-    VkExtent2D                             framebuffer_size,
-    ExternalMemory                         external_memory,
-    OutputData< AppType::Headless > const& setup,
-    OutputData< AppType::Windowed >&       output
+    VkExtent3D                            image_extents,
+    ExternalMemory                        external_memory,
+    SetupData< AppType::Headless > const& setup,
+    OutputData< AppType::Headless >&      output
 ) -> bool;
 
 auto initialize(

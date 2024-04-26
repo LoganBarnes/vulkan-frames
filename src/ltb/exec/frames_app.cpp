@@ -5,28 +5,20 @@
 // project
 #include "ltb/ltb_config.hpp"
 #include "ltb/net/fd_socket.hpp"
-#include "ltb/utils/ignore.hpp"
 #include "ltb/utils/read_file.hpp"
 #include "ltb/vlk/check.hpp"
 #include "ltb/vlk/output.hpp"
 
 // external
 #include <spdlog/spdlog.h>
-#include <vulkan/vulkan.h>
 
 // standard
-#include <algorithm>
 #include <cerrno>
 #include <charconv>
 #include <filesystem>
-#include <fstream>
 #include <optional>
 #include <ranges>
-#include <set>
 #include <vector>
-
-// platform
-#include <fcntl.h>
 
 namespace ltb
 {
@@ -92,11 +84,8 @@ private:
     VkCommandBuffer command_buffer_       = { };
     VkFence         graphics_queue_fence_ = { };
 
-    // Size dependent objects
-    VkImage        color_image_        = { };
-    VkDeviceMemory color_image_memory_ = { };
-    VkImageView    color_image_view_   = { };
-    VkFramebuffer  framebuffer_        = { };
+    // Output
+    vlk::OutputData< vlk::AppType::Headless > output_ = { };
 
     // Pipeline
     ModelUniforms    model_uniforms_   = { };
@@ -128,29 +117,7 @@ App::~App( )
         spdlog::debug( "vkDestroyPipelineLayout()" );
     }
 
-    if ( nullptr != framebuffer_ )
-    {
-        ::vkDestroyFramebuffer( setup_.device, framebuffer_, nullptr );
-        spdlog::debug( "vkDestroyFramebuffer()" );
-    }
-
-    if ( nullptr != color_image_view_ )
-    {
-        ::vkDestroyImageView( setup_.device, color_image_view_, nullptr );
-        spdlog::debug( "vkDestroyImageView()" );
-    }
-
-    if ( nullptr != color_image_memory_ )
-    {
-        ::vkFreeMemory( setup_.device, color_image_memory_, nullptr );
-        spdlog::debug( "vkFreeMemory()" );
-    }
-
-    if ( nullptr != color_image_ )
-    {
-        ::vkDestroyImage( setup_.device, color_image_, nullptr );
-        spdlog::debug( "vkDestroyImage()" );
-    }
+    vlk::destroy( setup_, output_ );
 
     if ( nullptr != graphics_queue_fence_ )
     {
@@ -191,117 +158,7 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
     );
     spdlog::debug( "vkCreateFence()" );
 
-    auto const external_color_image_info = VkExternalMemoryImageCreateInfo{
-        .sType       = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
-        .pNext       = nullptr,
-        .handleTypes = external_memory_handle_type,
-    };
-    auto const color_image_create_info = VkImageCreateInfo{
-        .sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext       = &external_color_image_info,
-        .flags       = 0,
-        .imageType   = VK_IMAGE_TYPE_2D,
-        .format      = setup_.color_format,
-        .extent      = image_extents,
-        .mipLevels   = 1,
-        .arrayLayers = 1,
-        .samples     = VK_SAMPLE_COUNT_1_BIT,
-        .tiling      = VK_IMAGE_TILING_OPTIMAL,
-        .usage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices   = nullptr,
-        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-    CHECK_VK( ::vkCreateImage( setup_.device, &color_image_create_info, nullptr, &color_image_ ) );
-    spdlog::debug( "vkCreateImage()" );
-
-    auto color_image_mem_reqs = VkMemoryRequirements{ };
-    ::vkGetImageMemoryRequirements( setup_.device, color_image_, &color_image_mem_reqs );
-
-    auto memory_props = VkPhysicalDeviceMemoryProperties{ };
-    ::vkGetPhysicalDeviceMemoryProperties( setup_.physical_device, &memory_props );
-    auto const mem_prop_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
-    auto memory_type_index = std::optional< uint32 >{ };
-    for ( auto i = 0u; i < memory_props.memoryTypeCount; ++i )
-    {
-        auto const type_is_suitable
-            = ( 0 != ( color_image_mem_reqs.memoryTypeBits & ( 1u << i ) ) );
-        auto const props_exist
-            = ( memory_props.memoryTypes[ i ].propertyFlags & mem_prop_flags ) == mem_prop_flags;
-
-        if ( ( !memory_type_index ) && type_is_suitable && props_exist )
-        {
-            memory_type_index = uint32{ i };
-        }
-    }
-
-    if ( !memory_type_index )
-    {
-        spdlog::error( "No suitable memory type found" );
-        return false;
-    }
-
-    auto const export_image_memory_info = VkExportMemoryAllocateInfo{
-        .sType       = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
-        .pNext       = nullptr,
-        .handleTypes = external_memory_handle_type,
-    };
-    auto const color_image_alloc_info = VkMemoryAllocateInfo{
-        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext           = &export_image_memory_info,
-        .allocationSize  = color_image_mem_reqs.size,
-        .memoryTypeIndex = memory_type_index.value( ),
-    };
-    CHECK_VK(
-        ::vkAllocateMemory( setup_.device, &color_image_alloc_info, nullptr, &color_image_memory_ )
-    );
-    spdlog::debug( "vkAllocateMemory()" );
-
-    CHECK_VK( ::vkBindImageMemory( setup_.device, color_image_, color_image_memory_, 0 ) );
-
-    auto const color_image_view_create_info = VkImageViewCreateInfo{
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .pNext            = nullptr,
-        .flags            = 0,
-        .image            = color_image_,
-        .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-        .format           = setup_.color_format,
-        .components       = VkComponentMapping{ },
-        .subresourceRange = VkImageSubresourceRange{
-            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel   = 0,
-            .levelCount     = 1,
-            .baseArrayLayer = 0,
-            .layerCount     = 1,
-        },
-    };
-    CHECK_VK( ::vkCreateImageView(
-        setup_.device,
-        &color_image_view_create_info,
-        nullptr,
-        &color_image_view_
-    ) );
-    spdlog::debug( "vkCreateImageView()" );
-
-    auto const framebuffer_create_info = VkFramebufferCreateInfo{
-        .sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-        .pNext           = nullptr,
-        .flags           = 0,
-        .renderPass      = setup_.render_pass,
-        .attachmentCount = 1,
-        .pAttachments    = &color_image_view_,
-        .width           = image_extents.width,
-        .height          = image_extents.height,
-        .layers          = 1,
-    };
-    CHECK_VK(
-        ::vkCreateFramebuffer( setup_.device, &framebuffer_create_info, nullptr, &framebuffer_ )
-    );
-    spdlog::debug( "vkCreateFramebuffer()" );
-
-    spdlog::info( "Color image file descriptor: {}", color_image_fd_ );
+    CHECK_TRUE( vlk::initialize( image_extents, vlk::ExternalMemory::Yes, setup_, output_ ) );
 
     auto const push_constant_ranges = std::array{
         VkPushConstantRange{
@@ -591,7 +448,7 @@ auto App::run( ) -> bool
             .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
             .pNext           = nullptr,
             .renderPass      = setup_.render_pass,
-            .framebuffer     = framebuffer_,
+            .framebuffer     = output_.framebuffer,
             .renderArea      = VkRect2D{
                 .offset = VkOffset2D{ .x = 0, .y = 0 },
                 .extent = {.width = image_extents.width, .height = image_extents.height },
@@ -687,11 +544,13 @@ auto App::run( ) -> bool
             auto const memory_info = VkMemoryGetFdInfoKHR{
                 .sType      = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR,
                 .pNext      = nullptr,
-                .memory     = color_image_memory_,
+                .memory     = output_.color_image_memory,
                 .handleType = external_memory_handle_type,
             };
             CHECK_VK( vkGetMemoryFdKHR( setup_.device, &memory_info, &color_image_fd_ ) );
             spdlog::debug( "vkGetMemoryFdKHR()" );
+
+            spdlog::info( "Color image file descriptor: {}", color_image_fd_ );
 
             if ( !socket_.initialize( ) )
             {
