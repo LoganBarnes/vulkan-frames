@@ -46,6 +46,7 @@ struct PipelineData< Pipeline::Triangle >
 {
     ModelUniforms    model_uniforms   = { };
     DisplayUniforms  display_uniforms = { };
+    VkRenderPass     render_pass      = { };
     VkPipelineLayout pipeline_layout  = { };
     VkPipeline       pipeline         = { };
 };
@@ -53,6 +54,9 @@ struct PipelineData< Pipeline::Triangle >
 template <>
 struct PipelineData< Pipeline::Composite >
 {
+    VkRenderPass     render_pass     = { };
+    VkPipelineLayout pipeline_layout = { };
+    VkPipeline       pipeline        = { };
 };
 
 template < AppType app_type, Pipeline pipeline_type >
@@ -72,6 +76,12 @@ auto destroy( SetupData< app_type > const& setup, PipelineData< pipeline_type >&
     {
         ::vkDestroyPipelineLayout( setup.device, pipeline.pipeline_layout, nullptr );
         spdlog::debug( "vkDestroyPipelineLayout()" );
+    }
+
+    if ( nullptr != pipeline.render_pass )
+    {
+        ::vkDestroyRenderPass( setup.device, pipeline.render_pass, nullptr );
+        spdlog::debug( "vkDestroyRenderPass()" );
     }
 }
 

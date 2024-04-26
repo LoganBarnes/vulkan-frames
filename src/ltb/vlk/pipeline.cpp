@@ -10,11 +10,107 @@
 
 namespace ltb::vlk
 {
+namespace
+{
+
+auto initialize_render_pass(
+    VkFormat const      color_format,
+    VkImageLayout const final_layout,
+    VkDevice const&     device,
+    VkRenderPass&       render_pass
+)
+{
+    auto const attachments = std::vector{
+        VkAttachmentDescription{
+            .flags          = 0U,
+            .format         = color_format,
+            .samples        = VK_SAMPLE_COUNT_1_BIT,
+            .loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
+            .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+            .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
+            .finalLayout    = final_layout,
+        },
+    };
+
+    auto const color_attachment_refs = std::vector{
+        VkAttachmentReference{
+            .attachment = 0U,
+            .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        },
+    };
+
+    auto const subpasses = std::vector{
+        VkSubpassDescription{
+            .flags                   = 0U,
+            .pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS,
+            .inputAttachmentCount    = 0U,
+            .pInputAttachments       = nullptr,
+            .colorAttachmentCount    = static_cast< uint32 >( color_attachment_refs.size( ) ),
+            .pColorAttachments       = color_attachment_refs.data( ),
+            .pResolveAttachments     = nullptr,
+            .pDepthStencilAttachment = nullptr,
+            .preserveAttachmentCount = 0U,
+            .pPreserveAttachments    = nullptr,
+        },
+    };
+
+    auto const subpass_dependencies = std::vector{
+        VkSubpassDependency{
+            .srcSubpass      = VK_SUBPASS_EXTERNAL,
+            .dstSubpass      = 0U,
+            .srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .srcAccessMask   = 0U,
+            .dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dependencyFlags = 0U,
+        },
+    };
+
+    auto const render_pass_create_info = VkRenderPassCreateInfo{
+        .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .pNext           = nullptr,
+        .flags           = 0U,
+        .attachmentCount = static_cast< uint32 >( attachments.size( ) ),
+        .pAttachments    = attachments.data( ),
+        .subpassCount    = static_cast< uint32 >( subpasses.size( ) ),
+        .pSubpasses      = subpasses.data( ),
+        .dependencyCount = static_cast< uint32 >( subpass_dependencies.size( ) ),
+        .pDependencies   = subpass_dependencies.data( ),
+    };
+
+    CHECK_VK( ::vkCreateRenderPass( device, &render_pass_create_info, nullptr, &render_pass ) );
+    spdlog::debug( "vkCreateRenderPass()" );
+
+    return true;
+}
+
+} // namespace
 
 template < AppType app_type, Pipeline pipeline_type >
 auto initialize( SetupData< app_type > const& setup, PipelineData< pipeline_type >& pipeline )
     -> bool
 {
+    if constexpr ( AppType::Headless == app_type )
+    {
+        CHECK_TRUE( initialize_render_pass(
+            setup.color_format,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            setup.device,
+            pipeline.render_pass
+        ) );
+    }
+    else
+    {
+        CHECK_TRUE( initialize_render_pass(
+            setup.surface_format.format,
+            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            setup.device,
+            pipeline.render_pass
+        ) );
+    }
+
     auto const push_constant_ranges = std::array{
         VkPushConstantRange{
             .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
@@ -211,7 +307,7 @@ auto initialize( SetupData< app_type > const& setup, PipelineData< pipeline_type
         .pColorBlendState    = &color_blending,
         .pDynamicState       = &dynamic_state,
         .layout              = pipeline.pipeline_layout,
-        .renderPass          = setup.render_pass,
+        .renderPass          = pipeline.render_pass,
         .subpass             = 0,
         .basePipelineHandle  = nullptr,
         .basePipelineIndex   = -1,

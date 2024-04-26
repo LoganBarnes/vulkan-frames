@@ -31,7 +31,6 @@ struct SetupData< AppType::Headless >
     VkQueue                             graphics_queue                  = { };
     VkCommandPool                       graphics_command_pool           = { };
     VkFormat                            color_format                    = { };
-    VkRenderPass                        render_pass                     = { };
 };
 
 template <>
@@ -54,7 +53,6 @@ struct SetupData< AppType::Windowed >
     VkQueue                             surface_queue                   = { };
     VkCommandPool                       graphics_command_pool           = { };
     VkSurfaceFormatKHR                  surface_format                  = { };
-    VkRenderPass                        render_pass                     = { };
 };
 
 template < AppType app_type >

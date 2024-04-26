@@ -435,79 +435,6 @@ auto initialize_device(
     return true;
 }
 
-auto initialize_render_pass(
-    VkFormat const      color_format,
-    VkImageLayout const final_layout,
-    VkDevice const&     device,
-    VkRenderPass&       render_pass
-)
-{
-    auto const attachments = std::vector{
-        VkAttachmentDescription{
-            .flags          = 0U,
-            .format         = color_format,
-            .samples        = VK_SAMPLE_COUNT_1_BIT,
-            .loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
-            .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
-            .finalLayout    = final_layout,
-        },
-    };
-
-    auto const color_attachment_refs = std::vector{
-        VkAttachmentReference{
-            .attachment = 0U,
-            .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        },
-    };
-
-    auto const subpasses = std::vector{
-        VkSubpassDescription{
-            .flags                   = 0U,
-            .pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS,
-            .inputAttachmentCount    = 0U,
-            .pInputAttachments       = nullptr,
-            .colorAttachmentCount    = static_cast< uint32 >( color_attachment_refs.size( ) ),
-            .pColorAttachments       = color_attachment_refs.data( ),
-            .pResolveAttachments     = nullptr,
-            .pDepthStencilAttachment = nullptr,
-            .preserveAttachmentCount = 0U,
-            .pPreserveAttachments    = nullptr,
-        },
-    };
-
-    auto const subpass_dependencies = std::vector{
-        VkSubpassDependency{
-            .srcSubpass      = VK_SUBPASS_EXTERNAL,
-            .dstSubpass      = 0U,
-            .srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .srcAccessMask   = 0U,
-            .dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            .dependencyFlags = 0U,
-        },
-    };
-
-    auto const render_pass_create_info = VkRenderPassCreateInfo{
-        .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .pNext           = nullptr,
-        .flags           = 0U,
-        .attachmentCount = static_cast< uint32 >( attachments.size( ) ),
-        .pAttachments    = attachments.data( ),
-        .subpassCount    = static_cast< uint32 >( subpasses.size( ) ),
-        .pSubpasses      = subpasses.data( ),
-        .dependencyCount = static_cast< uint32 >( subpass_dependencies.size( ) ),
-        .pDependencies   = subpass_dependencies.data( ),
-    };
-
-    CHECK_VK( ::vkCreateRenderPass( device, &render_pass_create_info, nullptr, &render_pass ) );
-    spdlog::debug( "vkCreateRenderPass()" );
-
-    return true;
-}
-
 struct SurfaceFormatEquals
 {
     VkSurfaceFormatKHR const& format;
@@ -576,13 +503,6 @@ auto initialize( uint32 const physical_device_index, SetupData< AppType::Headles
     ) );
 
     setup.color_format = VK_FORMAT_B8G8R8A8_SRGB;
-    CHECK_TRUE( initialize_render_pass(
-        setup.color_format,
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        setup.device,
-        setup.render_pass
-    ) );
-
     return true;
 }
 
@@ -657,25 +577,12 @@ auto initialize( uint32 const physical_device_index, SetupData< AppType::Windowe
         setup.surface_format = surface_formats[ 0U ];
     }
 
-    CHECK_TRUE( initialize_render_pass(
-        setup.surface_format.format,
-        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        setup.device,
-        setup.render_pass
-    ) );
-
     return true;
 }
 
 template < AppType app_type >
 auto destroy( SetupData< app_type >& setup ) -> void
 {
-    if ( nullptr != setup.render_pass )
-    {
-        ::vkDestroyRenderPass( setup.device, setup.render_pass, nullptr );
-        spdlog::debug( "vkDestroyRenderPass()" );
-    }
-
     if ( nullptr != setup.graphics_command_pool )
     {
         ::vkDestroyCommandPool( setup.device, setup.graphics_command_pool, nullptr );

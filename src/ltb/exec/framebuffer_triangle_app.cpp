@@ -40,25 +40,37 @@ public:
 
 private:
     // Vulkan data
-    vlk::SetupData< vlk::AppType::Windowed >     setup_    = { };
-    vlk::PipelineData< vlk::Pipeline::Triangle > pipeline_ = { };
-    vlk::OutputData< vlk::AppType::Windowed >    output_   = { };
-    vlk::SyncData< vlk::AppType::Windowed >      sync_     = { };
+    vlk::SetupData< vlk::AppType::Windowed >     setup_             = { };
+    vlk::PipelineData< vlk::Pipeline::Triangle > triangle_pipeline_ = { };
+    vlk::OutputData< vlk::AppType::Windowed >    windowed_output_   = { };
+    vlk::OutputData< vlk::AppType::Headless >    headless_output_   = { };
+    vlk::SyncData< vlk::AppType::Windowed >      sync_              = { };
 };
 
 App::~App( )
 {
     vlk::destroy( setup_, sync_ );
-    vlk::destroy( setup_, output_ );
-    vlk::destroy( setup_, pipeline_ );
+    vlk::destroy( setup_, triangle_pipeline_ );
+    vlk::destroy( setup_, windowed_output_ );
     vlk::destroy( setup_ );
 }
 
 auto App::initialize( uint32 const physical_device_index ) -> bool
 {
     CHECK_TRUE( vlk::initialize( physical_device_index, setup_ ) );
-    CHECK_TRUE( vlk::initialize( setup_, pipeline_ ) );
-    CHECK_TRUE( vlk::initialize( setup_, pipeline_, output_ ) );
+    CHECK_TRUE( vlk::initialize( setup_, triangle_pipeline_ ) );
+    CHECK_TRUE( vlk::initialize( setup_, triangle_pipeline_, windowed_output_ ) );
+    CHECK_TRUE( vlk::initialize(
+        VkExtent3D{
+            windowed_output_.framebuffer_size.width,
+            windowed_output_.framebuffer_size.height,
+            1
+        },
+        vlk::ExternalMemory::No,
+        setup_,
+        triangle_pipeline_,
+        headless_output_
+    ) );
     CHECK_TRUE( vlk::initialize( max_frames_in_flight, setup_, sync_ ) );
     return true;
 }
@@ -81,7 +93,7 @@ auto App::run( ) -> bool
         auto const current_duration_s
             = std::chrono::duration_cast< FloatSeconds >( current_duration ).count( );
 
-        pipeline_.model_uniforms.scale_rotation_translation[ 1 ]
+        triangle_pipeline_.model_uniforms.scale_rotation_translation[ 1 ]
             = M_PI_2f * angular_velocity_rps * current_duration_s;
 
         // Render pipeline here.
@@ -103,13 +115,13 @@ auto App::run( ) -> bool
         auto swapchain_image_index = uint32{ 0 };
         CHECK_VK( ::vkAcquireNextImageKHR(
             setup_.device,
-            output_.swapchain,
+            windowed_output_.swapchain,
             max_possible_timeout,
             image_available_semaphore,
             nullptr,
             &swapchain_image_index
         ) );
-        auto* const framebuffer = output_.framebuffers[ swapchain_image_index ];
+        auto* const framebuffer = windowed_output_.framebuffers[ swapchain_image_index ];
 
         CHECK_VK( ::vkResetFences(
             setup_.device,
@@ -137,23 +149,27 @@ auto App::run( ) -> bool
         auto const render_pass_info = VkRenderPassBeginInfo{
             .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
             .pNext           = nullptr,
-            .renderPass      = pipeline_.render_pass,
+            .renderPass      = triangle_pipeline_.render_pass,
             .framebuffer     = framebuffer,
             .renderArea      = VkRect2D{
                  .offset = VkOffset2D{ .x = 0, .y = 0 },
-                 .extent = output_.framebuffer_size,
+                 .extent = windowed_output_.framebuffer_size,
             },
             .clearValueCount = static_cast< uint32 >( clear_values.size( ) ),
             .pClearValues    = clear_values.data( ),
         };
         ::vkCmdBeginRenderPass( command_buffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE );
-        ::vkCmdBindPipeline( command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.pipeline );
+        ::vkCmdBindPipeline(
+            command_buffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            triangle_pipeline_.pipeline
+        );
 
         auto const viewport = VkViewport{
             .x        = 0.0F,
             .y        = 0.0F,
-            .width    = static_cast< float32 >( output_.framebuffer_size.width ),
-            .height   = static_cast< float32 >( output_.framebuffer_size.height ),
+            .width    = static_cast< float32 >( windowed_output_.framebuffer_size.width ),
+            .height   = static_cast< float32 >( windowed_output_.framebuffer_size.height ),
             .minDepth = 0.0F,
             .maxDepth = 1.0F,
         };
@@ -163,7 +179,7 @@ auto App::run( ) -> bool
 
         auto const scissors = VkRect2D{
             .offset = VkOffset2D{ .x = 0, .y = 0 },
-            .extent = output_.framebuffer_size,
+            .extent = windowed_output_.framebuffer_size,
         };
         auto constexpr first_scissor = 0U;
         auto constexpr scissor_count = 1U;
@@ -171,20 +187,20 @@ auto App::run( ) -> bool
 
         ::vkCmdPushConstants(
             command_buffer,
-            pipeline_.pipeline_layout,
+            triangle_pipeline_.pipeline_layout,
             VK_SHADER_STAGE_VERTEX_BIT,
             0,
-            sizeof( pipeline_.model_uniforms ),
-            &pipeline_.model_uniforms
+            sizeof( triangle_pipeline_.model_uniforms ),
+            &triangle_pipeline_.model_uniforms
         );
 
         ::vkCmdPushConstants(
             command_buffer,
-            pipeline_.pipeline_layout,
+            triangle_pipeline_.pipeline_layout,
             VK_SHADER_STAGE_FRAGMENT_BIT,
-            sizeof( pipeline_.model_uniforms ),
-            sizeof( pipeline_.display_uniforms ),
-            &pipeline_.display_uniforms
+            sizeof( triangle_pipeline_.model_uniforms ),
+            sizeof( triangle_pipeline_.display_uniforms ),
+            &triangle_pipeline_.display_uniforms
         );
 
         auto constexpr vertex_count   = 3U;
@@ -234,7 +250,7 @@ auto App::run( ) -> bool
             .waitSemaphoreCount = 1U,
             .pWaitSemaphores    = &render_finished_semaphore,
             .swapchainCount     = 1U,
-            .pSwapchains        = &output_.swapchain,
+            .pSwapchains        = &windowed_output_.swapchain,
             .pImageIndices      = &swapchain_image_index,
             .pResults           = nullptr,
         };

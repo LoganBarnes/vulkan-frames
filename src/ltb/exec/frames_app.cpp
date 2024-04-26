@@ -55,8 +55,8 @@ public:
 private:
     // Vulkan
     vlk::SetupData< vlk::AppType::Headless >     setup_    = { };
-    vlk::OutputData< vlk::AppType::Headless >    output_   = { };
     vlk::PipelineData< vlk::Pipeline::Triangle > pipeline_ = { };
+    vlk::OutputData< vlk::AppType::Headless >    output_   = { };
     vlk::SyncData< vlk::AppType::Headless >      sync_     = { };
 
     // Networking
@@ -72,16 +72,18 @@ App::~App( )
     }
 
     vlk::destroy( setup_, sync_ );
-    vlk::destroy( setup_, pipeline_ );
     vlk::destroy( setup_, output_ );
+    vlk::destroy( setup_, pipeline_ );
     vlk::destroy( setup_ );
 }
 
 auto App::initialize( uint32 const physical_device_index ) -> bool
 {
     CHECK_TRUE( vlk::initialize( physical_device_index, setup_ ) );
-    CHECK_TRUE( vlk::initialize( image_extents, vlk::ExternalMemory::Yes, setup_, output_ ) );
     CHECK_TRUE( vlk::initialize( setup_, pipeline_ ) );
+    CHECK_TRUE(
+        vlk::initialize( image_extents, vlk::ExternalMemory::Yes, setup_, pipeline_, output_ )
+    );
     CHECK_TRUE( vlk::initialize( setup_, sync_ ) );
     return true;
 }
@@ -161,7 +163,7 @@ auto App::run( ) -> bool
         auto const render_pass_info = VkRenderPassBeginInfo{
             .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
             .pNext           = nullptr,
-            .renderPass      = setup_.render_pass,
+            .renderPass      = pipeline_.render_pass,
             .framebuffer     = output_.framebuffer,
             .renderArea      = VkRect2D{
                 .offset = VkOffset2D{ .x = 0, .y = 0 },
