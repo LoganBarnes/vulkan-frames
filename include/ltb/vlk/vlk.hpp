@@ -10,6 +10,7 @@
 #include <vulkan/vulkan.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+#include <spdlog/spdlog.h>
 
 namespace ltb::vlk
 {
@@ -24,6 +25,12 @@ enum class ExternalMemory
 {
     No,
     Yes
+};
+
+enum class Pipeline
+{
+    Triangle,
+    Composite,
 };
 
 } // namespace ltb::vlk

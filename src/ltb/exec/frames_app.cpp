@@ -8,6 +8,7 @@
 #include "ltb/utils/read_file.hpp"
 #include "ltb/vlk/check.hpp"
 #include "ltb/vlk/output.hpp"
+#include "ltb/vlk/pipeline.hpp"
 
 // external
 #include <spdlog/spdlog.h>
@@ -33,32 +34,6 @@ auto constexpr image_extents = VkExtent3D{
 
 auto constexpr external_memory_handle_type = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
 auto constexpr max_possible_timeout        = std::numeric_limits< uint64_t >::max( );
-
-auto constexpr uniform_alignment = 16;
-
-struct ModelUniforms
-{
-    alignas( uniform_alignment ) std::array< float32, 4 > scale_rotation_translation = {
-        1.0F,
-        0.0F,
-        0.0F,
-        0.0F,
-    };
-};
-
-struct DisplayUniforms
-{
-    alignas( uniform_alignment ) std::array< float32, 4 > color = { 1.0F, 1.0F, 1.0F, 1.0F };
-};
-
-auto constexpr float_size = sizeof( float32 );
-auto constexpr vec4_size  = float_size * 4;
-
-static_assert( vec4_size == uniform_alignment );
-static_assert( sizeof( ModelUniforms ) == vec4_size );
-static_assert( alignof( ModelUniforms ) == uniform_alignment );
-static_assert( sizeof( DisplayUniforms ) == vec4_size );
-static_assert( alignof( DisplayUniforms ) == uniform_alignment );
 
 } // namespace
 
@@ -88,10 +63,7 @@ private:
     vlk::OutputData< vlk::AppType::Headless > output_ = { };
 
     // Pipeline
-    ModelUniforms    model_uniforms_   = { };
-    DisplayUniforms  display_uniforms_ = { };
-    VkPipelineLayout pipeline_layout_  = { };
-    VkPipeline       pipeline_         = { };
+    vlk::PipelineData< vlk::Pipeline::Triangle > pipeline_ = { };
 
     // Networking
     net::FdSocket socket_         = { };
@@ -105,18 +77,7 @@ App::~App( )
         spdlog::error( "close(color_image_fd) failed: {}", std::strerror( errno ) );
     }
 
-    if ( nullptr != pipeline_ )
-    {
-        ::vkDestroyPipeline( setup_.device, pipeline_, nullptr );
-        spdlog::debug( "vkDestroyPipeline()" );
-    }
-
-    if ( nullptr != pipeline_layout_ )
-    {
-        ::vkDestroyPipelineLayout( setup_.device, pipeline_layout_, nullptr );
-        spdlog::debug( "vkDestroyPipelineLayout()" );
-    }
-
+    vlk::destroy( setup_, pipeline_ );
     vlk::destroy( setup_, output_ );
 
     if ( nullptr != graphics_queue_fence_ )
@@ -159,217 +120,7 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
     spdlog::debug( "vkCreateFence()" );
 
     CHECK_TRUE( vlk::initialize( image_extents, vlk::ExternalMemory::Yes, setup_, output_ ) );
-
-    auto const push_constant_ranges = std::array{
-        VkPushConstantRange{
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-            .offset     = 0,
-            .size       = sizeof( model_uniforms_ ),
-        },
-        VkPushConstantRange{
-            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .offset     = sizeof( model_uniforms_ ),
-            .size       = sizeof( display_uniforms_ ),
-        }
-    };
-
-    auto const pipeline_layout_info = VkPipelineLayoutCreateInfo{
-        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pNext                  = nullptr,
-        .flags                  = 0,
-        .setLayoutCount         = 0,
-        .pSetLayouts            = nullptr,
-        .pushConstantRangeCount = static_cast< uint32 >( push_constant_ranges.size( ) ),
-        .pPushConstantRanges    = push_constant_ranges.data( )
-    };
-    CHECK_VK(
-        ::vkCreatePipelineLayout( setup_.device, &pipeline_layout_info, nullptr, &pipeline_layout_ )
-    );
-    spdlog::debug( "vkCreatePipelineLayout()" );
-
-    auto const vert_shader_path = config::spriv_shader_dir_path( ) / "triangle.vert.spv";
-    auto const frag_shader_path = config::spriv_shader_dir_path( ) / "triangle.frag.spv";
-
-    auto vert_shader_code = std::vector< uint32_t >{ };
-    auto frag_shader_code = std::vector< uint32_t >{ };
-    if ( ( !utils::get_binary_file_contents( vert_shader_path, vert_shader_code ) )
-         || ( !utils::get_binary_file_contents( frag_shader_path, frag_shader_code ) ) )
-    {
-        return false;
-    }
-
-    auto const vert_shader_module_create_info = VkShaderModuleCreateInfo{
-        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .pNext    = nullptr,
-        .flags    = 0,
-        .codeSize = vert_shader_code.size( ) * sizeof( uint32_t ),
-        .pCode    = vert_shader_code.data( ),
-    };
-    auto* vert_shader_module = VkShaderModule{ };
-    CHECK_VK( ::vkCreateShaderModule(
-        setup_.device,
-        &vert_shader_module_create_info,
-        nullptr,
-        &vert_shader_module
-    ) );
-
-    auto const frag_shader_module_create_info = VkShaderModuleCreateInfo{
-        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .pNext    = nullptr,
-        .flags    = 0,
-        .codeSize = frag_shader_code.size( ) * sizeof( uint32_t ),
-        .pCode    = frag_shader_code.data( ),
-    };
-    auto* frag_shader_module = VkShaderModule{ };
-    CHECK_VK( ::vkCreateShaderModule(
-        setup_.device,
-        &frag_shader_module_create_info,
-        nullptr,
-        &frag_shader_module
-    ) );
-
-    auto const shader_stages = std::vector{
-        VkPipelineShaderStageCreateInfo{
-            .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .pNext               = nullptr,
-            .flags               = 0,
-            .stage               = VK_SHADER_STAGE_VERTEX_BIT,
-            .module              = vert_shader_module,
-            .pName               = "main",
-            .pSpecializationInfo = nullptr,
-        },
-        VkPipelineShaderStageCreateInfo{
-            .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .pNext               = nullptr,
-            .flags               = 0,
-            .stage               = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .module              = frag_shader_module,
-            .pName               = "main",
-            .pSpecializationInfo = nullptr,
-        },
-    };
-
-    auto const vertex_input_info = VkPipelineVertexInputStateCreateInfo{
-        .sType                         = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .pNext                         = nullptr,
-        .flags                         = 0,
-        .vertexBindingDescriptionCount = 0,
-        .pVertexBindingDescriptions    = nullptr,
-        .vertexAttributeDescriptionCount = 0,
-        .pVertexAttributeDescriptions    = nullptr,
-    };
-
-    auto const input_assembly = VkPipelineInputAssemblyStateCreateInfo{
-        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        .pNext                  = nullptr,
-        .flags                  = 0,
-        .topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-        .primitiveRestartEnable = VK_FALSE,
-    };
-
-    auto const viewport_state = VkPipelineViewportStateCreateInfo{
-        .sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        .pNext         = nullptr,
-        .flags         = 0,
-        .viewportCount = 1,
-        .pViewports    = nullptr,
-        .scissorCount  = 1,
-        .pScissors     = nullptr,
-    };
-
-    auto const rasterizer = VkPipelineRasterizationStateCreateInfo{
-        .sType                   = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        .pNext                   = nullptr,
-        .flags                   = 0,
-        .depthClampEnable        = VK_FALSE,
-        .rasterizerDiscardEnable = VK_FALSE,
-        .polygonMode             = VK_POLYGON_MODE_FILL,
-        .cullMode                = VK_CULL_MODE_BACK_BIT,
-        .frontFace               = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-        .depthBiasEnable         = VK_FALSE,
-        .depthBiasConstantFactor = 0.0F,
-        .depthBiasClamp          = 0.0F,
-        .depthBiasSlopeFactor    = 0.0F,
-        .lineWidth               = 1.0F,
-    };
-
-    auto const multisampling = VkPipelineMultisampleStateCreateInfo{
-        .sType                 = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .pNext                 = nullptr,
-        .flags                 = 0,
-        .rasterizationSamples  = VK_SAMPLE_COUNT_1_BIT,
-        .sampleShadingEnable   = VK_FALSE,
-        .minSampleShading      = 1.0F,
-        .pSampleMask           = nullptr,
-        .alphaToCoverageEnable = VK_FALSE,
-        .alphaToOneEnable      = VK_FALSE,
-    };
-
-    auto const color_blend_attachment = VkPipelineColorBlendAttachmentState{
-        .blendEnable         = VK_FALSE,
-        .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
-        .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
-        .colorBlendOp        = VK_BLEND_OP_ADD,
-        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-        .alphaBlendOp        = VK_BLEND_OP_ADD,
-        .colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
-                        | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-    };
-
-    auto const color_blending = VkPipelineColorBlendStateCreateInfo{
-        .sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        .pNext           = nullptr,
-        .flags           = 0,
-        .logicOpEnable   = VK_FALSE,
-        .logicOp         = VK_LOGIC_OP_COPY,
-        .attachmentCount = 1,
-        .pAttachments    = &color_blend_attachment,
-        .blendConstants  = { 0.0F, 0.0F, 0.0F, 0.0F },
-    };
-
-    auto const dynamic_states = std::array{ VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-    auto const dynamic_state  = VkPipelineDynamicStateCreateInfo{
-         .sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-         .pNext             = nullptr,
-         .flags             = 0,
-         .dynamicStateCount = static_cast< uint32 >( dynamic_states.size( ) ),
-         .pDynamicStates    = dynamic_states.data( ),
-    };
-
-    auto const pipeline_create_info = VkGraphicsPipelineCreateInfo{
-        .sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .pNext               = nullptr,
-        .flags               = 0,
-        .stageCount          = static_cast< uint32 >( shader_stages.size( ) ),
-        .pStages             = shader_stages.data( ),
-        .pVertexInputState   = &vertex_input_info,
-        .pInputAssemblyState = &input_assembly,
-        .pTessellationState  = nullptr,
-        .pViewportState      = &viewport_state,
-        .pRasterizationState = &rasterizer,
-        .pMultisampleState   = &multisampling,
-        .pDepthStencilState  = nullptr,
-        .pColorBlendState    = &color_blending,
-        .pDynamicState       = &dynamic_state,
-        .layout              = pipeline_layout_,
-        .renderPass          = setup_.render_pass,
-        .subpass             = 0,
-        .basePipelineHandle  = nullptr,
-        .basePipelineIndex   = -1,
-    };
-    CHECK_VK( ::vkCreateGraphicsPipelines(
-        setup_.device,
-        nullptr,
-        1,
-        &pipeline_create_info,
-        nullptr,
-        &pipeline_
-    ) );
-    spdlog::debug( "vkCreateGraphicsPipelines()" );
-
-    ::vkDestroyShaderModule( setup_.device, frag_shader_module, nullptr );
-    ::vkDestroyShaderModule( setup_.device, vert_shader_module, nullptr );
+    CHECK_TRUE( vlk::initialize( setup_, pipeline_ ) );
 
     return true;
 }
@@ -408,7 +159,7 @@ auto App::run( ) -> bool
             auto const current_duration_s
                 = std::chrono::duration_cast< FloatSeconds >( current_duration ).count( );
 
-            model_uniforms_.scale_rotation_translation[ 1 ]
+            pipeline_.model_uniforms.scale_rotation_translation[ 1 ]
                 = M_PI_2f * angular_velocity_rps * current_duration_s;
         }
 
@@ -458,7 +209,7 @@ auto App::run( ) -> bool
         };
 
         ::vkCmdBeginRenderPass( command_buffer_, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE );
-        ::vkCmdBindPipeline( command_buffer_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_ );
+        ::vkCmdBindPipeline( command_buffer_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.pipeline );
 
         auto const viewport = VkViewport{
             .x        = 0.0F,
@@ -482,20 +233,20 @@ auto App::run( ) -> bool
 
         ::vkCmdPushConstants(
             command_buffer_,
-            pipeline_layout_,
+            pipeline_.pipeline_layout,
             VK_SHADER_STAGE_VERTEX_BIT,
             0,
-            sizeof( model_uniforms_ ),
-            &model_uniforms_
+            sizeof( pipeline_.model_uniforms ),
+            &pipeline_.model_uniforms
         );
 
         ::vkCmdPushConstants(
             command_buffer_,
-            pipeline_layout_,
+            pipeline_.pipeline_layout,
             VK_SHADER_STAGE_FRAGMENT_BIT,
-            sizeof( model_uniforms_ ),
-            sizeof( display_uniforms_ ),
-            &display_uniforms_
+            sizeof( pipeline_.model_uniforms ),
+            sizeof( pipeline_.display_uniforms ),
+            &pipeline_.display_uniforms
         );
 
         auto constexpr vertex_count   = 3;
