@@ -48,7 +48,7 @@ inline auto generated_dir_path( ) -> std::filesystem::path
     return "@LTB_VLK_GENERATED_DIR@";
 }
 
-inline auto spriv_shader_dir_path( ) -> std::filesystem::path
+inline auto spirv_shader_dir_path( ) -> std::filesystem::path
 {
     return generated_dir_path( ) / "shaders";
 }

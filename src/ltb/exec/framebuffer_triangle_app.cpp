@@ -40,11 +40,12 @@ public:
 
 private:
     // Vulkan data
-    vlk::SetupData< vlk::AppType::Windowed >     setup_             = { };
-    vlk::PipelineData< vlk::Pipeline::Triangle > triangle_pipeline_ = { };
-    vlk::OutputData< vlk::AppType::Windowed >    windowed_output_   = { };
-    vlk::OutputData< vlk::AppType::Headless >    headless_output_   = { };
-    vlk::SyncData< vlk::AppType::Windowed >      sync_              = { };
+    vlk::SetupData< vlk::AppType::Windowed >      setup_              = { };
+    vlk::PipelineData< vlk::Pipeline::Triangle >  triangle_pipeline_  = { };
+    vlk::PipelineData< vlk::Pipeline::Composite > composite_pipeline_ = { };
+    vlk::OutputData< vlk::AppType::Windowed >     windowed_output_    = { };
+    vlk::OutputData< vlk::AppType::Headless >     headless_output_    = { };
+    vlk::SyncData< vlk::AppType::Windowed >       sync_               = { };
 };
 
 App::~App( )
@@ -52,6 +53,7 @@ App::~App( )
     vlk::destroy( setup_, sync_ );
     vlk::destroy( setup_, triangle_pipeline_ );
     vlk::destroy( setup_, windowed_output_ );
+    vlk::destroy( setup_, headless_output_ );
     vlk::destroy( setup_ );
 }
 

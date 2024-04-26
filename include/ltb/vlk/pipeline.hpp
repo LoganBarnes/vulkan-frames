@@ -54,14 +54,27 @@ struct PipelineData< Pipeline::Triangle >
 template <>
 struct PipelineData< Pipeline::Composite >
 {
-    VkRenderPass     render_pass     = { };
-    VkPipelineLayout pipeline_layout = { };
-    VkPipeline       pipeline        = { };
+    VkRenderPass                   render_pass           = { };
+    VkDescriptorPool               descriptor_pool       = { };
+    VkDescriptorSetLayout          descriptor_set_layout = { };
+    std::vector< VkDescriptorSet > descriptor_sets       = { };
+    VkPipelineLayout               pipeline_layout       = { };
+    VkPipeline                     pipeline              = { };
 };
 
 template < AppType app_type, Pipeline pipeline_type >
 auto initialize( SetupData< app_type > const& setup, PipelineData< pipeline_type >& pipeline )
-    -> bool;
+    -> bool
+{
+    return initialize( setup, pipeline, 1U );
+}
+
+template < AppType app_type, Pipeline pipeline_type >
+auto initialize(
+    SetupData< app_type > const&   setup,
+    PipelineData< pipeline_type >& pipeline,
+    uint32                         max_frames_in_flight
+) -> bool;
 
 template < AppType app_type, Pipeline pipeline_type >
 auto destroy( SetupData< app_type > const& setup, PipelineData< pipeline_type >& pipeline ) -> void
@@ -76,6 +89,21 @@ auto destroy( SetupData< app_type > const& setup, PipelineData< pipeline_type >&
     {
         ::vkDestroyPipelineLayout( setup.device, pipeline.pipeline_layout, nullptr );
         spdlog::debug( "vkDestroyPipelineLayout()" );
+    }
+
+    if constexpr ( Pipeline::Composite == pipeline_type )
+    {
+        if ( nullptr != pipeline.descriptor_set_layout )
+        {
+            ::vkDestroyDescriptorSetLayout( setup.device, pipeline.descriptor_set_layout, nullptr );
+            spdlog::debug( "vkDestroyDescriptorSetLayout()" );
+        }
+
+        if ( nullptr != pipeline.descriptor_pool )
+        {
+            ::vkDestroyDescriptorPool( setup.device, pipeline.descriptor_pool, nullptr );
+            spdlog::debug( "vkDestroyDescriptorPool()" );
+        }
     }
 
     if ( nullptr != pipeline.render_pass )

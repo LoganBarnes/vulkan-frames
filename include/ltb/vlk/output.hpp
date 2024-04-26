@@ -37,24 +37,12 @@ struct OutputData< AppType::Windowed >
     std::vector< VkFramebuffer > framebuffers          = { };
 };
 
-template < AppType app_type, Pipeline pipeline_type >
-auto initialize(
-    VkExtent3D                           image_extents,
-    ExternalMemory                       external_memory,
-    SetupData< app_type > const&         setup,
-    PipelineData< pipeline_type > const& pipeline,
-    OutputData< AppType::Headless >&     output
-) -> bool;
-
 template < Pipeline pipeline_type >
 auto initialize(
     SetupData< AppType::Windowed > const& setup,
     PipelineData< pipeline_type > const&  pipeline,
     OutputData< AppType::Windowed >&      output
 ) -> bool;
-
-template < AppType app_type >
-auto destroy( SetupData< app_type > const& setup, OutputData< app_type >& output ) -> void;
 
 template < AppType app_type, Pipeline pipeline_type >
 auto initialize(
@@ -199,6 +187,62 @@ auto initialize(
     spdlog::debug( "vkCreateFramebuffer()" );
 
     return true;
+}
+
+template < AppType setup_app_type >
+auto destroy( SetupData< setup_app_type > const& setup, OutputData< AppType::Headless >& output )
+    -> void
+{
+    if ( nullptr != output.framebuffer )
+    {
+        ::vkDestroyFramebuffer( setup.device, output.framebuffer, nullptr );
+        spdlog::debug( "vkDestroyFramebuffer()" );
+    }
+
+    if ( nullptr != output.color_image_view )
+    {
+        ::vkDestroyImageView( setup.device, output.color_image_view, nullptr );
+        spdlog::debug( "vkDestroyImageView()" );
+    }
+
+    if ( nullptr != output.color_image_memory )
+    {
+        ::vkFreeMemory( setup.device, output.color_image_memory, nullptr );
+        spdlog::debug( "vkFreeMemory()" );
+    }
+
+    if ( nullptr != output.color_image )
+    {
+        ::vkDestroyImage( setup.device, output.color_image, nullptr );
+        spdlog::debug( "vkDestroyImage()" );
+    }
+}
+
+template < AppType setup_app_type >
+auto destroy( SetupData< setup_app_type > const& setup, OutputData< AppType::Windowed >& output )
+    -> void
+{
+    for ( auto* const framebuffer : output.framebuffers )
+    {
+        ::vkDestroyFramebuffer( setup.device, framebuffer, nullptr );
+    }
+    spdlog::debug( "vkDestroyFramebuffer()x{}", output.framebuffers.size( ) );
+    output.framebuffers.clear( );
+
+    for ( auto* const image_view : output.swapchain_image_views )
+    {
+        ::vkDestroyImageView( setup.device, image_view, nullptr );
+    }
+    spdlog::debug( "vkDestroyImageView()x{}", output.swapchain_image_views.size( ) );
+    output.swapchain_image_views.clear( );
+
+    output.swapchain_images.clear( );
+
+    if ( nullptr != output.swapchain )
+    {
+        ::vkDestroySwapchainKHR( setup.device, output.swapchain, nullptr );
+        spdlog::debug( "vkDestroySwapchainKHR()" );
+    }
 }
 
 } // namespace ltb::vlk
