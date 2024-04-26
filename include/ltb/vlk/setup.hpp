@@ -4,26 +4,13 @@
 #pragma once
 
 // project
-#include "ltb/utils/types.hpp"
+#include "ltb/vlk/vlk.hpp"
 
-// external
-#include <vulkan/vulkan.h>
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-
-// external
+// standard
 #include <array>
-
-struct GLFWwindow;
 
 namespace ltb::vlk
 {
-
-enum class AppType
-{
-    Headless,
-    Windowed
-};
 
 template < AppType app_type >
 struct SetupData;

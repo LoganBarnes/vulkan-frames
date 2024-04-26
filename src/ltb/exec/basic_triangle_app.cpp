@@ -7,7 +7,7 @@
 #include "ltb/utils/ignore.hpp"
 #include "ltb/utils/read_file.hpp"
 #include "ltb/vlk/check.hpp"
-#include "ltb/vlk/setup.hpp"
+#include "ltb/vlk/output.hpp"
 
 // external
 #include <spdlog/spdlog.h>
@@ -91,11 +91,7 @@ private:
     uint32                         current_frame_              = 0;
 
     // Output
-    VkSwapchainKHR               swapchain_             = { };
-    std::vector< VkImage >       swapchain_images_      = { };
-    std::vector< VkImageView >   swapchain_image_views_ = { };
-    std::vector< VkFramebuffer > framebuffers_          = { };
-    VkExtent2D                   framebuffer_size_      = { };
+    vlk::OutputData< vlk::AppType::Windowed > output_ = { };
 
     // Pipeline
     ModelUniforms    model_uniforms_   = { };
@@ -118,26 +114,7 @@ App::~App( )
         spdlog::debug( "vkDestroyPipelineLayout()" );
     }
 
-    for ( auto* const framebuffer : framebuffers_ )
-    {
-        ::vkDestroyFramebuffer( setup_.device, framebuffer, nullptr );
-    }
-    spdlog::debug( "vkDestroyFramebuffer()x{}", framebuffers_.size( ) );
-    framebuffers_.clear( );
-
-    for ( auto* const image_view : swapchain_image_views_ )
-    {
-        ::vkDestroyImageView( setup_.device, image_view, nullptr );
-    }
-    spdlog::debug( "vkDestroyImageView()x{}", swapchain_image_views_.size( ) );
-    swapchain_image_views_.clear( );
-
-    swapchain_images_.clear( );
-    if ( nullptr != swapchain_ )
-    {
-        ::vkDestroySwapchainKHR( setup_.device, swapchain_, nullptr );
-        spdlog::debug( "vkDestroySwapchainKHR()" );
-    }
+    vlk::destroy( setup_, output_ );
 
     for ( auto* const fence : graphics_queue_fences_ )
     {
@@ -242,144 +219,7 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
     }
     spdlog::debug( "vkCreateFence()x{}", max_frames_in_flight );
 
-    auto framebuffer_width  = int32{ 0 };
-    auto framebuffer_height = int32{ 0 };
-    ::glfwGetFramebufferSize( setup_.window, &framebuffer_width, &framebuffer_height );
-
-    auto surface_capabilities = VkSurfaceCapabilitiesKHR{ };
-    CHECK_VK( ::vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-        setup_.physical_device,
-        setup_.surface,
-        &surface_capabilities
-    ) );
-
-    framebuffer_size_ = VkExtent2D{
-        std::clamp(
-            static_cast< uint32 >( framebuffer_width ),
-            surface_capabilities.minImageExtent.width,
-            surface_capabilities.maxImageExtent.width
-        ),
-        std::clamp(
-            static_cast< uint32 >( framebuffer_height ),
-            surface_capabilities.minImageExtent.height,
-            surface_capabilities.maxImageExtent.height
-        ),
-    };
-
-    auto min_image_count = surface_capabilities.minImageCount + 1U;
-
-    // don't exceed the max (zero means no maximum).
-    if ( ( surface_capabilities.maxImageCount > 0U )
-         && ( min_image_count > surface_capabilities.maxImageCount ) )
-    {
-        min_image_count = surface_capabilities.maxImageCount;
-    }
-
-    auto const unique_queue_indices = std::set{
-        setup_.graphics_queue_family_index,
-        setup_.surface_queue_family_index,
-    };
-
-    auto const queue_family_indices
-        = std::vector< uint32 >( unique_queue_indices.begin( ), unique_queue_indices.end( ) );
-
-    auto const concurrency               = ( queue_family_indices.size( ) > 1 );
-    auto const unique_queue_family_count = static_cast< uint32 >( queue_family_indices.size( ) );
-
-    auto const swapchain_create_info = VkSwapchainCreateInfoKHR{
-        .sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .pNext            = nullptr,
-        .flags            = 0U,
-        .surface          = setup_.surface,
-        .minImageCount    = min_image_count,
-        .imageFormat      = setup_.surface_format.format,
-        .imageColorSpace  = setup_.surface_format.colorSpace,
-        .imageExtent      = framebuffer_size_,
-        .imageArrayLayers = 1U,
-        .imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-        .imageSharingMode
-        = ( concurrency ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE ),
-        .queueFamilyIndexCount = ( concurrency ? unique_queue_family_count : 0 ),
-        .pQueueFamilyIndices   = queue_family_indices.data( ),
-        .preTransform          = surface_capabilities.currentTransform,
-        .compositeAlpha        = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode           = VK_PRESENT_MODE_FIFO_KHR,
-        .clipped               = VK_TRUE,
-        .oldSwapchain          = nullptr,
-    };
-
-    CHECK_VK( ::vkCreateSwapchainKHR( setup_.device, &swapchain_create_info, nullptr, &swapchain_ )
-    );
-    spdlog::debug( "vkCreateSwapchainKHR()" );
-
-    auto swapchain_image_count = uint32{ 0 };
-    CHECK_VK(
-        ::vkGetSwapchainImagesKHR( setup_.device, swapchain_, &swapchain_image_count, nullptr )
-    );
-    swapchain_images_.resize( swapchain_image_count );
-    CHECK_VK( ::vkGetSwapchainImagesKHR(
-        setup_.device,
-        swapchain_,
-        &swapchain_image_count,
-        swapchain_images_.data( )
-    ) );
-    spdlog::debug( "vkGetSwapchainImagesKHR()" );
-
-    swapchain_image_views_.resize( swapchain_image_count );
-    for ( auto i = 0U; i < swapchain_image_count; ++i )
-    {
-        auto const image_view_create_info = VkImageViewCreateInfo{
-            .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .pNext            = nullptr,
-            .flags            = 0U,
-            .image            = swapchain_images_[ i ],
-            .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-            .format           = setup_.surface_format.format,
-            .components       = VkComponentMapping{
-                .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .a = VK_COMPONENT_SWIZZLE_IDENTITY,
-            },
-            .subresourceRange = VkImageSubresourceRange{
-                .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel   = 0U,
-                .levelCount     = 1U,
-                .baseArrayLayer = 0U,
-                .layerCount     = 1U,
-            },
-        };
-        CHECK_VK( ::vkCreateImageView(
-            setup_.device,
-            &image_view_create_info,
-            nullptr,
-            swapchain_image_views_.data( ) + i
-        ) );
-    }
-    spdlog::debug( "vkCreateImageView()x{}", swapchain_image_views_.size( ) );
-
-    framebuffers_.resize( swapchain_image_count );
-    for ( auto i = 0U; i < swapchain_image_count; ++i )
-    {
-        auto const framebuffer_create_info = VkFramebufferCreateInfo{
-            .sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-            .pNext           = nullptr,
-            .flags           = 0U,
-            .renderPass      = setup_.render_pass,
-            .attachmentCount = 1U,
-            .pAttachments    = swapchain_image_views_.data( ) + i,
-            .width           = framebuffer_size_.width,
-            .height          = framebuffer_size_.height,
-            .layers          = 1U,
-        };
-        CHECK_VK( ::vkCreateFramebuffer(
-            setup_.device,
-            &framebuffer_create_info,
-            nullptr,
-            framebuffers_.data( ) + i
-        ) );
-    }
-    spdlog::debug( "vkCreateFramebuffer()x{}", framebuffers_.size( ) );
+    CHECK_TRUE( vlk::initialize( setup_, output_ ) );
 
     auto const push_constant_ranges = std::array{
         VkPushConstantRange{
@@ -634,13 +474,13 @@ auto App::run( ) -> bool
         auto swapchain_image_index = uint32{ 0 };
         CHECK_VK( ::vkAcquireNextImageKHR(
             setup_.device,
-            swapchain_,
+            output_.swapchain,
             max_possible_timeout,
             image_available_semaphore,
             nullptr,
             &swapchain_image_index
         ) );
-        auto* const framebuffer = framebuffers_[ swapchain_image_index ];
+        auto* const framebuffer = output_.framebuffers[ swapchain_image_index ];
 
         CHECK_VK( ::vkResetFences(
             setup_.device,
@@ -672,7 +512,7 @@ auto App::run( ) -> bool
             .framebuffer     = framebuffer,
             .renderArea      = VkRect2D{
                  .offset = VkOffset2D{ .x = 0, .y = 0 },
-                 .extent = framebuffer_size_,
+                 .extent = output_.framebuffer_size,
             },
             .clearValueCount = static_cast< uint32 >( clear_values.size( ) ),
             .pClearValues    = clear_values.data( ),
@@ -683,8 +523,8 @@ auto App::run( ) -> bool
         auto const viewport = VkViewport{
             .x        = 0.0F,
             .y        = 0.0F,
-            .width    = static_cast< float32 >( framebuffer_size_.width ),
-            .height   = static_cast< float32 >( framebuffer_size_.height ),
+            .width    = static_cast< float32 >( output_.framebuffer_size.width ),
+            .height   = static_cast< float32 >( output_.framebuffer_size.height ),
             .minDepth = 0.0F,
             .maxDepth = 1.0F,
         };
@@ -694,7 +534,7 @@ auto App::run( ) -> bool
 
         auto const scissors = VkRect2D{
             .offset = VkOffset2D{ .x = 0, .y = 0 },
-            .extent = framebuffer_size_,
+            .extent = output_.framebuffer_size,
         };
         auto constexpr first_scissor = 0U;
         auto constexpr scissor_count = 1U;
@@ -764,7 +604,7 @@ auto App::run( ) -> bool
             .waitSemaphoreCount = 1U,
             .pWaitSemaphores    = &render_finished_semaphore,
             .swapchainCount     = 1U,
-            .pSwapchains        = &swapchain_,
+            .pSwapchains        = &output_.swapchain,
             .pImageIndices      = &swapchain_image_index,
             .pResults           = nullptr,
         };
