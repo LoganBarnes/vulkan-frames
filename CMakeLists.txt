@@ -37,7 +37,8 @@ add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/res/shaders)
 # ##############################################################################
 # Source Files
 # ##############################################################################
-file(GLOB_RECURSE LtbVlk_SOURCE_FILES
+file(
+  GLOB_RECURSE LtbVlk_SOURCE_FILES
   LIST_DIRECTORIES false
   CONFIGURE_DEPENDS
   ${CMAKE_CURRENT_LIST_DIR}/src/ltb/*.cpp

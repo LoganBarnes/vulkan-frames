@@ -3,14 +3,18 @@
 // /////////////////////////////////////////////////////////////
 #pragma once
 
+// project
+#include "ltb/utils/types.hpp"
+
+// standard
+#include <span>
+
 namespace ltb::utils
 {
 
-template < typename... T >
-auto ignore( T&&... ) -> void
-{
-    // This method exists to make ignored values explicit.
-    // Nothing needs to happen here.
-}
+auto get_physical_device_index_from_args(
+    std::span< char const* > const& args,
+    uint32&                         physical_device_index
+) -> bool;
 
 } // namespace ltb::utils

@@ -4,19 +4,12 @@
 
 // project
 #include "ltb/net/fd_socket.hpp"
+#include "ltb/utils/args.hpp"
 #include "ltb/vlk/check.hpp"
 #include "ltb/vlk/render.hpp"
 
-// external
-#include <spdlog/spdlog.h>
-
 // standard
 #include <cerrno>
-#include <charconv>
-#include <filesystem>
-#include <optional>
-#include <ranges>
-#include <vector>
 
 namespace ltb
 {
@@ -166,29 +159,26 @@ auto App::run( ) -> bool
 
 } // namespace ltb
 
-auto main( ltb::int32 const argc, char const* const argv[] ) -> ltb::int32
+auto main( ltb::int32 const argc, char const* argv[] ) -> ltb::int32
 {
     spdlog::set_level( spdlog::level::trace );
 
     auto physical_device_index = ltb::uint32{ 0 };
-    if ( argc > 1 )
+    if ( !ltb::utils::get_physical_device_index_from_args(
+             { argv, static_cast< size_t >( argc ) },
+             physical_device_index
+         ) )
     {
-        auto const* const start = argv[ 1 ];
-        auto const* const end   = argv[ 1 ] + std::strlen( argv[ 1 ] );
-
-        if ( auto const result = std::from_chars( start, end, physical_device_index );
-             std::errc( ) != result.ec )
-        {
-            spdlog::error( "Invalid argument: {}", argv[ 1 ] );
-            return 1;
-        }
+        return EXIT_FAILURE;
     }
 
-    if ( auto app = ltb::App( ); app.initialize( physical_device_index ) )
+    if ( auto app = ltb::App( ); app.initialize( physical_device_index ) && app.run( ) )
     {
-        app.run( );
+        spdlog::info( "Done." );
+        return EXIT_SUCCESS;
     }
-
-    spdlog::info( "Done." );
-    return 0;
+    else
+    {
+        return EXIT_FAILURE;
+    }
 }
