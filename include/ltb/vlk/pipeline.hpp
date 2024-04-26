@@ -49,6 +49,8 @@ struct PipelineData< Pipeline::Triangle >
     VkRenderPass     render_pass      = { };
     VkPipelineLayout pipeline_layout  = { };
     VkPipeline       pipeline         = { };
+
+    static constexpr auto vertex_count = 3U;
 };
 
 template <>
@@ -60,6 +62,8 @@ struct PipelineData< Pipeline::Composite >
     std::vector< VkDescriptorSet > descriptor_sets       = { };
     VkPipelineLayout               pipeline_layout       = { };
     VkPipeline                     pipeline              = { };
+
+    static constexpr auto vertex_count = 4U;
 };
 
 template < AppType app_type, Pipeline pipeline_type >
