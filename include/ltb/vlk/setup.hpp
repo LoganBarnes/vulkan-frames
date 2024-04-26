@@ -30,6 +30,7 @@ struct SetupData< AppType::Headless >
     VkDevice                            device                          = { };
     VkQueue                             graphics_queue                  = { };
     VkCommandPool                       graphics_command_pool           = { };
+    VkFormat                            color_format                    = { };
     VkRenderPass                        render_pass                     = { };
 };
 

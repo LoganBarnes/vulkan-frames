@@ -16,6 +16,9 @@
 #include <ranges>
 #include <set>
 
+// platform
+#include <fcntl.h>
+
 namespace ltb::vlk
 {
 namespace
@@ -433,9 +436,10 @@ auto initialize_device(
 }
 
 auto initialize_render_pass(
-    VkFormat const  color_format,
-    VkDevice const& device,
-    VkRenderPass&   render_pass
+    VkFormat const      color_format,
+    VkImageLayout const final_layout,
+    VkDevice const&     device,
+    VkRenderPass&       render_pass
 )
 {
     auto const attachments = std::vector{
@@ -448,7 +452,7 @@ auto initialize_render_pass(
             .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
             .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
             .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
-            .finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            .finalLayout    = final_layout,
         },
     };
 
@@ -520,6 +524,24 @@ struct SurfaceFormatEquals
 template <>
 auto initialize( SetupData< AppType::Headless >& setup, uint32 const physical_device_index ) -> bool
 {
+    // Setup non-blocking console input
+    if ( auto const fcntl_get_result = ::fcntl( STDIN_FILENO, F_SETFL, O_NONBLOCK );
+         fcntl_get_result < 0 )
+    {
+        spdlog::error( "fcntl() failed: {}", std::strerror( errno ) );
+        return false;
+    }
+    else
+    {
+        if ( auto const fcntl_set_result
+             = ::fcntl( STDIN_FILENO, F_SETFL, fcntl_get_result | O_NONBLOCK );
+             fcntl_set_result < 0 )
+        {
+            spdlog::error( "fcntl() failed: {}", std::strerror( errno ) );
+            return false;
+        }
+    }
+
     auto const extra_extension_names = std::vector< char const* >{ };
     CHECK_TRUE( initialize_instance(
         setup.instance,
@@ -553,8 +575,13 @@ auto initialize( SetupData< AppType::Headless >& setup, uint32 const physical_de
         surface_queue
     ) );
 
-    auto constexpr color_format = VK_FORMAT_B8G8R8A8_SRGB;
-    CHECK_TRUE( initialize_render_pass( color_format, setup.device, setup.render_pass ) );
+    setup.color_format = VK_FORMAT_B8G8R8A8_SRGB;
+    CHECK_TRUE( initialize_render_pass(
+        setup.color_format,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        setup.device,
+        setup.render_pass
+    ) );
 
     return true;
 }
@@ -630,9 +657,12 @@ auto initialize( SetupData< AppType::Windowed >& setup, uint32 const physical_de
         setup.surface_format = surface_formats[ 0U ];
     }
 
-    CHECK_TRUE(
-        initialize_render_pass( setup.surface_format.format, setup.device, setup.render_pass )
-    );
+    CHECK_TRUE( initialize_render_pass(
+        setup.surface_format.format,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        setup.device,
+        setup.render_pass
+    ) );
 
     return true;
 }
