@@ -73,7 +73,7 @@ auto initialize(
     PipelineData< pipeline_type >& pipeline
 ) -> bool
 {
-    return initialize<app_type>( 1U, color_format, device, pipeline );
+    return initialize< app_type >( 1U, color_format, device, pipeline );
 }
 
 template < AppType app_type, Pipeline pipeline_type >
