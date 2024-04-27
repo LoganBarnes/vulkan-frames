@@ -15,17 +15,17 @@ namespace ltb::vlk
 
 constexpr auto max_possible_timeout = std::numeric_limits< uint64_t >::max( );
 
-template < AppType app_type, Pipeline pipeline_type >
+template < AppType setup_app_type, Pipeline pipeline_type, AppType output_app_type >
 auto render(
-    SetupData< app_type > const&         setup,
+    SetupData< setup_app_type > const&   setup,
     PipelineData< pipeline_type > const& pipeline,
-    OutputData< app_type > const&        output,
-    SyncData< app_type > const&          sync
+    OutputData< output_app_type > const& output,
+    SyncData< output_app_type > const&   sync
 ) -> bool
 {
     auto* graphics_queue_fence = VkFence{ };
 
-    if constexpr ( AppType::Windowed == app_type )
+    if constexpr ( AppType::Windowed == output_app_type )
     {
         graphics_queue_fence = sync.graphics_queue_fences[ sync.current_frame ];
     }
@@ -48,7 +48,7 @@ auto render(
     auto* framebuffer           = VkFramebuffer{ };
     auto* command_buffer        = VkCommandBuffer{ };
 
-    if constexpr ( AppType::Windowed == app_type )
+    if constexpr ( AppType::Windowed == output_app_type )
     {
         CHECK_VK( ::vkAcquireNextImageKHR(
             setup.device,
@@ -172,7 +172,7 @@ auto render(
 
     CHECK_VK( ::vkEndCommandBuffer( command_buffer ) );
 
-    if constexpr ( AppType::Windowed == app_type )
+    if constexpr ( AppType::Windowed == output_app_type )
     {
         auto constexpr semaphore_stage
             = VkPipelineStageFlags{ VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };

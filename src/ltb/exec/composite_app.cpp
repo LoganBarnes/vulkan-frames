@@ -109,9 +109,11 @@ App::~App( )
 auto App::initialize( uint32 const physical_device_index ) -> bool
 {
     CHECK_TRUE( vlk::initialize( physical_device_index, setup_ ) );
-    CHECK_TRUE( vlk::initialize( setup_, pipeline_, max_frames_in_flight ) );
+    CHECK_TRUE( vlk::initialize<vlk::AppType::Windowed>( max_frames_in_flight, setup_.surface_format.format, setup_.device, pipeline_ ) );
     CHECK_TRUE( vlk::initialize( setup_, pipeline_, output_ ) );
-    CHECK_TRUE( vlk::initialize( max_frames_in_flight, setup_, sync_ ) );
+    CHECK_TRUE(
+        vlk::initialize( max_frames_in_flight, setup_.device, setup_.graphics_command_pool, sync_ )
+    );
 
     auto constexpr socket_path = "socket";
 
@@ -344,7 +346,7 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
                 .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                 .pNext            = nullptr,
                 .dstSet           = pipeline_.descriptor_sets[ i ],
-                .dstBinding       = 1U,
+                .dstBinding       = 0U,
                 .dstArrayElement  = 0U,
                 .descriptorCount  = 1U,
                 .descriptorType   = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,

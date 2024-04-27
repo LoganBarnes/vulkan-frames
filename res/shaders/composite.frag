@@ -1,7 +1,7 @@
 #version 450
 
 // Uniforms
-layout(binding = 1) uniform sampler2D tex_sampler1;
+layout(binding = 0) uniform sampler2D tex_sampler1;
 //layout(binding = 2) uniform sampler2D tex_sampler2;
 //layout(binding = 3) uniform sampler2D tex_sampler3;
 //layout(binding = 4) uniform sampler2D tex_sampler4;

@@ -68,11 +68,13 @@ App::~App( )
 auto App::initialize( uint32 const physical_device_index ) -> bool
 {
     CHECK_TRUE( vlk::initialize( physical_device_index, setup_ ) );
-    CHECK_TRUE( vlk::initialize( setup_, pipeline_ ) );
+    CHECK_TRUE(
+        vlk::initialize< vlk::AppType::Headless >( setup_.color_format, setup_.device, pipeline_ )
+    );
     CHECK_TRUE(
         vlk::initialize( image_extents, vlk::ExternalMemory::Yes, setup_, pipeline_, output_ )
     );
-    CHECK_TRUE( vlk::initialize( setup_, sync_ ) );
+    CHECK_TRUE( vlk::initialize( setup_.device, setup_.graphics_command_pool, sync_ ) );
     return true;
 }
 

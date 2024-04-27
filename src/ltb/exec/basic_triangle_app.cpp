@@ -49,9 +49,16 @@ App::~App( )
 auto App::initialize( uint32 const physical_device_index ) -> bool
 {
     CHECK_TRUE( vlk::initialize( physical_device_index, setup_ ) );
-    CHECK_TRUE( vlk::initialize( setup_, pipeline_ ) );
+    CHECK_TRUE( vlk::initialize< vlk::AppType::Windowed >(
+        max_frames_in_flight,
+        setup_.surface_format.format,
+        setup_.device,
+        pipeline_
+    ) );
     CHECK_TRUE( vlk::initialize( setup_, pipeline_, output_ ) );
-    CHECK_TRUE( vlk::initialize( max_frames_in_flight, setup_, sync_ ) );
+    CHECK_TRUE(
+        vlk::initialize( max_frames_in_flight, setup_.device, setup_.graphics_command_pool, sync_ )
+    );
     return true;
 }
 

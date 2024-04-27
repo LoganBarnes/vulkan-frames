@@ -67,17 +67,21 @@ struct PipelineData< Pipeline::Composite >
 };
 
 template < AppType app_type, Pipeline pipeline_type >
-auto initialize( SetupData< app_type > const& setup, PipelineData< pipeline_type >& pipeline )
-    -> bool
+auto initialize(
+    VkFormat const                 color_format,
+    VkDevice const&                device,
+    PipelineData< pipeline_type >& pipeline
+) -> bool
 {
-    return initialize( setup, pipeline, 1U );
+    return initialize<app_type>( 1U, color_format, device, pipeline );
 }
 
 template < AppType app_type, Pipeline pipeline_type >
 auto initialize(
-    SetupData< app_type > const&   setup,
-    PipelineData< pipeline_type >& pipeline,
-    uint32                         max_frames_in_flight
+    uint32                         max_frames_in_flight,
+    VkFormat                       color_format,
+    VkDevice const&                device,
+    PipelineData< pipeline_type >& pipeline
 ) -> bool;
 
 template < AppType app_type, Pipeline pipeline_type >
