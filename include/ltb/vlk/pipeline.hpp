@@ -4,7 +4,7 @@
 #pragma once
 
 // project
-#include "ltb/vlk/setup.hpp"
+#include "ltb/vlk/output.hpp"
 
 // standard
 #include <vector>
@@ -46,7 +46,6 @@ struct PipelineData< Pipeline::Triangle >
 {
     ModelUniforms    model_uniforms   = { };
     DisplayUniforms  display_uniforms = { };
-    VkRenderPass     render_pass      = { };
     VkPipelineLayout pipeline_layout  = { };
     VkPipeline       pipeline         = { };
 
@@ -56,7 +55,6 @@ struct PipelineData< Pipeline::Triangle >
 template <>
 struct PipelineData< Pipeline::Composite >
 {
-    VkRenderPass                   render_pass           = { };
     VkDescriptorPool               descriptor_pool       = { };
     VkDescriptorSetLayout          descriptor_set_layout = { };
     std::vector< VkDescriptorSet > descriptor_sets       = { };
@@ -66,59 +64,36 @@ struct PipelineData< Pipeline::Composite >
     static constexpr auto vertex_count = 4U;
 };
 
-template < AppType app_type, Pipeline pipeline_type >
+/// \brief Initialize all the fields of a PipelineData struct.
+template < Pipeline pipeline_type >
 auto initialize(
-    VkFormat const                 color_format,
+    PipelineData< pipeline_type >& pipeline,
     VkDevice const&                device,
-    PipelineData< pipeline_type >& pipeline
-) -> bool
-{
-    return initialize< app_type >( 1U, color_format, device, pipeline );
-}
-
-template < AppType app_type, Pipeline pipeline_type >
-auto initialize(
-    uint32                         max_frames_in_flight,
-    VkFormat                       color_format,
-    VkDevice const&                device,
-    PipelineData< pipeline_type >& pipeline
+    VkRenderPass const&            render_pass,
+    uint32                         max_frames_in_flight
 ) -> bool;
 
-template < AppType app_type, Pipeline pipeline_type >
-auto destroy( SetupData< app_type > const& setup, PipelineData< pipeline_type >& pipeline ) -> void
+/// \brief A wrapper function around the main initialize function.
+template < Pipeline pipeline_type, AppType setup_app_type, AppType output_app_type >
+auto initialize(
+    PipelineData< pipeline_type >&       pipeline,
+    SetupData< setup_app_type > const&   setup,
+    OutputData< output_app_type > const& output,
+    uint32                               max_frames_in_flight
+) -> bool
 {
-    if ( nullptr != pipeline.pipeline )
-    {
-        ::vkDestroyPipeline( setup.device, pipeline.pipeline, nullptr );
-        spdlog::debug( "vkDestroyPipeline()" );
-    }
+    return initialize( pipeline, setup.device, output.render_pass, max_frames_in_flight );
+}
 
-    if ( nullptr != pipeline.pipeline_layout )
-    {
-        ::vkDestroyPipelineLayout( setup.device, pipeline.pipeline_layout, nullptr );
-        spdlog::debug( "vkDestroyPipelineLayout()" );
-    }
+/// \brief Destroy all the fields of a PipelineData struct.
+template < Pipeline pipeline_type >
+auto destroy( PipelineData< pipeline_type >& pipeline, VkDevice const& device ) -> void;
 
-    if constexpr ( Pipeline::Composite == pipeline_type )
-    {
-        if ( nullptr != pipeline.descriptor_set_layout )
-        {
-            ::vkDestroyDescriptorSetLayout( setup.device, pipeline.descriptor_set_layout, nullptr );
-            spdlog::debug( "vkDestroyDescriptorSetLayout()" );
-        }
-
-        if ( nullptr != pipeline.descriptor_pool )
-        {
-            ::vkDestroyDescriptorPool( setup.device, pipeline.descriptor_pool, nullptr );
-            spdlog::debug( "vkDestroyDescriptorPool()" );
-        }
-    }
-
-    if ( nullptr != pipeline.render_pass )
-    {
-        ::vkDestroyRenderPass( setup.device, pipeline.render_pass, nullptr );
-        spdlog::debug( "vkDestroyRenderPass()" );
-    }
+/// \brief A wrapper function around the main destroy function.
+template < Pipeline pipeline_type, AppType app_type >
+auto destroy( PipelineData< pipeline_type >& pipeline, SetupData< app_type > const& setup ) -> void
+{
+    return destroy( pipeline, setup.device );
 }
 
 } // namespace ltb::vlk

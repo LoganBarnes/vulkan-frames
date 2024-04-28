@@ -298,7 +298,7 @@ auto initialize_physical_device(
         {
             if ( 0 != ( queue_families[ i ].queueFlags & VK_QUEUE_GRAPHICS_BIT ) )
             {
-                graphics_queue_family_index = i;
+                graphics_queue_family_index = uint32{ i };
             }
 
             if ( nullptr != optional_surface )
@@ -313,7 +313,7 @@ auto initialize_physical_device(
 
                 if ( VK_TRUE == surface_support )
                 {
-                    surface_queue_family_index = i;
+                    surface_queue_family_index = uint32{ i };
                 }
             }
         }
@@ -449,7 +449,7 @@ struct SurfaceFormatEquals
 } // namespace
 
 template <>
-auto initialize( uint32 const physical_device_index, SetupData< AppType::Headless >& setup ) -> bool
+auto initialize( SetupData< AppType::Headless >& setup, uint32 const physical_device_index ) -> bool
 {
     // Setup non-blocking console input
     if ( auto const fcntl_get_result = ::fcntl( STDIN_FILENO, F_SETFL, O_NONBLOCK );
@@ -507,7 +507,7 @@ auto initialize( uint32 const physical_device_index, SetupData< AppType::Headles
 }
 
 template <>
-auto initialize( uint32 const physical_device_index, SetupData< AppType::Windowed >& setup ) -> bool
+auto initialize( SetupData< AppType::Windowed >& setup, uint32 const physical_device_index ) -> bool
 {
     CHECK_TRUE( initialize_glfw( setup.glfw, setup.window ) );
 

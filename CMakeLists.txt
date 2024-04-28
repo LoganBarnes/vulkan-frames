@@ -41,7 +41,9 @@ file(
   GLOB_RECURSE LtbVlk_SOURCE_FILES
   LIST_DIRECTORIES false
   CONFIGURE_DEPENDS
-  ${CMAKE_CURRENT_LIST_DIR}/src/ltb/*.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/ltb/net/*.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/ltb/utils/*.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/ltb/vlk/*.cpp
 )
 
 # ##############################################################################

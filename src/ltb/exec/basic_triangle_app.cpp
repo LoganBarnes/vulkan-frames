@@ -19,47 +19,34 @@ constexpr auto max_frames_in_flight = uint32_t{ 2 };
 class App
 {
 public:
-    App( )                               = default;
-    App( App const& )                    = delete;
-    App( App&& )                         = delete;
-    auto operator=( App const& ) -> App& = delete;
-    auto operator=( App&& ) -> App&      = delete;
-    ~App( );
-
     auto initialize( uint32 physical_device_index ) -> bool;
-
+    auto destroy( ) -> void;
     auto run( ) -> bool;
 
 private:
     // Vulkan data
     vlk::SetupData< vlk::AppType::Windowed >     setup_    = { };
-    vlk::PipelineData< vlk::Pipeline::Triangle > pipeline_ = { };
     vlk::OutputData< vlk::AppType::Windowed >    output_   = { };
+    vlk::PipelineData< vlk::Pipeline::Triangle > pipeline_ = { };
     vlk::SyncData< vlk::AppType::Windowed >      sync_     = { };
 };
 
-App::~App( )
-{
-    vlk::destroy( setup_, sync_ );
-    vlk::destroy( setup_, output_ );
-    vlk::destroy( setup_, pipeline_ );
-    vlk::destroy( setup_ );
-}
-
 auto App::initialize( uint32 const physical_device_index ) -> bool
 {
-    CHECK_TRUE( vlk::initialize( physical_device_index, setup_ ) );
-    CHECK_TRUE( vlk::initialize< vlk::AppType::Windowed >(
-        max_frames_in_flight,
-        setup_.surface_format.format,
-        setup_.device,
-        pipeline_
-    ) );
-    CHECK_TRUE( vlk::initialize( setup_, pipeline_, output_ ) );
-    CHECK_TRUE(
-        vlk::initialize( max_frames_in_flight, setup_.device, setup_.graphics_command_pool, sync_ )
-    );
+    CHECK_TRUE( vlk::initialize( setup_, physical_device_index ) );
+    CHECK_TRUE( vlk::initialize( output_, setup_ ) );
+    CHECK_TRUE( vlk::initialize( pipeline_, setup_, output_, max_frames_in_flight ) );
+    CHECK_TRUE( vlk::initialize( sync_, setup_, max_frames_in_flight ) );
+
     return true;
+}
+
+auto App::destroy( ) -> void
+{
+    vlk::destroy( sync_, setup_ );
+    vlk::destroy( pipeline_, setup_ );
+    vlk::destroy( output_, setup_ );
+    vlk::destroy( setup_ );
 }
 
 auto App::run( ) -> bool
@@ -117,10 +104,12 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> ltb::int32
     if ( auto app = ltb::App( ); app.initialize( physical_device_index ) && app.run( ) )
     {
         spdlog::info( "Done." );
+        app.destroy( );
         return EXIT_SUCCESS;
     }
     else
     {
+        app.destroy( );
         return EXIT_FAILURE;
     }
 }

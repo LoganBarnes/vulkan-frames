@@ -17,14 +17,15 @@ namespace ltb::vlk
 
 enum class AppType
 {
-    Headless,
-    Windowed
+    Windowed,
+    Headless
 };
 
 enum class ExternalMemory
 {
-    No,
-    Yes
+    None,
+    Import,
+    Export,
 };
 
 enum class Pipeline

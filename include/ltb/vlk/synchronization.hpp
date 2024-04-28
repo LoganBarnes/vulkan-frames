@@ -16,13 +16,6 @@ template < AppType app_type >
 struct SyncData;
 
 template <>
-struct SyncData< AppType::Headless >
-{
-    VkCommandBuffer command_buffer       = { };
-    VkFence         graphics_queue_fence = { };
-};
-
-template <>
 struct SyncData< AppType::Windowed >
 {
     std::vector< VkCommandBuffer > command_buffers            = { };
@@ -32,75 +25,56 @@ struct SyncData< AppType::Windowed >
     uint32                         current_frame              = 0U;
 };
 
-auto initialize(
-    VkDevice const&                device,
-    VkCommandPool const&           command_pool,
-    SyncData< AppType::Headless >& sync
-) -> bool;
-
-auto initialize(
-    uint32                         max_frames_in_flight,
-    VkDevice const&                device,
-    VkCommandPool const&           command_pool,
-    SyncData< AppType::Windowed >& sync
-) -> bool;
-
-template < AppType setup_app_type, AppType app_type >
-auto destroy( SetupData< setup_app_type > const& setup, SyncData< app_type >& sync ) -> void
+template <>
+struct SyncData< AppType::Headless >
 {
-    if constexpr ( AppType::Headless == app_type )
-    {
-        if ( nullptr != sync.graphics_queue_fence )
-        {
-            ::vkDestroyFence( setup.device, sync.graphics_queue_fence, nullptr );
-            spdlog::debug( "vkDestroyFence()" );
-        }
+    VkCommandBuffer command_buffer       = { };
+    VkFence         graphics_queue_fence = { };
+};
 
-        if ( nullptr != sync.command_buffer )
-        {
-            ::vkFreeCommandBuffers(
-                setup.device,
-                setup.graphics_command_pool,
-                1,
-                &sync.command_buffer
-            );
-            spdlog::debug( "vkFreeCommandBuffers()" );
-        }
-    }
-    else
-    {
-        for ( auto* const fence : sync.graphics_queue_fences )
-        {
-            ::vkDestroyFence( setup.device, fence, nullptr );
-        }
-        spdlog::debug( "vkDestroyFence()x{}", sync.graphics_queue_fences.size( ) );
-        sync.graphics_queue_fences.clear( );
+/// \brief Initialize all the fields of a windowed SyncData struct.
+auto initialize(
+    SyncData< AppType::Windowed >& sync,
+    VkDevice const&                device,
+    VkCommandPool const&           command_pool,
+    uint32                         max_frames_in_flight
+) -> bool;
 
-        for ( auto* const semaphore : sync.render_finished_semaphores )
-        {
-            ::vkDestroySemaphore( setup.device, semaphore, nullptr );
-        }
-        spdlog::debug( "vkDestroySemaphore()x{}", sync.render_finished_semaphores.size( ) );
-        sync.render_finished_semaphores.clear( );
+/// \brief Initialize all the fields of a headless SyncData struct.
+auto initialize(
+    SyncData< AppType::Headless >& sync,
+    VkDevice const&                device,
+    VkCommandPool const&           command_pool
+) -> bool;
 
-        for ( auto* const semaphore : sync.image_available_semaphores )
-        {
-            ::vkDestroySemaphore( setup.device, semaphore, nullptr );
-        }
-        spdlog::debug( "vkDestroySemaphore()x{}", sync.image_available_semaphores.size( ) );
-        sync.image_available_semaphores.clear( );
+/// \brief A wrapper function around the main initialize function.
+auto initialize(
+    SyncData< AppType::Windowed >&        sync,
+    SetupData< AppType::Windowed > const& setup,
+    uint32                                max_frames_in_flight
+) -> bool;
 
-        if ( !sync.command_buffers.empty( ) )
-        {
-            ::vkFreeCommandBuffers(
-                setup.device,
-                setup.graphics_command_pool,
-                static_cast< uint32 >( sync.command_buffers.size( ) ),
-                sync.command_buffers.data( )
-            );
-            spdlog::debug( "vkFreeCommandBuffers()" );
-        }
-    }
+/// \brief A wrapper function around the main initialize function.
+template < AppType setup_app_type >
+auto initialize( SyncData< AppType::Headless >& sync, SetupData< setup_app_type > const& setup )
+    -> bool
+{
+    return initialize( sync, setup.device, setup.graphics_command_pool );
+}
+
+/// \brief Destroy all the fields of an SyncData struct.
+template < AppType app_type >
+auto destroy(
+    SyncData< app_type >& sync,
+    VkDevice const&       device,
+    VkCommandPool const&  graphics_command_pool
+) -> void;
+
+/// \brief A wrapper function around the main destroy function.
+template < AppType sync_app_type, AppType setup_app_type >
+auto destroy( SyncData< sync_app_type >& sync, SetupData< setup_app_type > const& setup ) -> void
+{
+    return destroy( sync, setup.device, setup.graphics_command_pool );
 }
 
 } // namespace ltb::vlk

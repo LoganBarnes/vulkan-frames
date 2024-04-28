@@ -4,7 +4,7 @@
 #pragma once
 
 // project
-#include "ltb/vlk/output.hpp"
+#include "ltb/vlk/pipeline.hpp"
 #include "ltb/vlk/synchronization.hpp"
 
 // standard
@@ -92,7 +92,7 @@ auto render(
     auto const render_pass_info = VkRenderPassBeginInfo{
         .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .pNext           = nullptr,
-        .renderPass      = pipeline.render_pass,
+        .renderPass      = output.render_pass,
         .framebuffer     = framebuffer,
         .renderArea      = VkRect2D{
              .offset = VkOffset2D{ .x = 0, .y = 0 },

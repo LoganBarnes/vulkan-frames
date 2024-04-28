@@ -4,8 +4,11 @@
 add_executable(basic_triangle_app basic_triangle_app.cpp)
 target_link_libraries(basic_triangle_app PRIVATE LtbVlk::LtbVlk)
 
-add_executable(framebuffer_triangle_app framebuffer_triangle_app.cpp)
-target_link_libraries(framebuffer_triangle_app PRIVATE LtbVlk::LtbVlk)
+#add_executable(framebuffer_triangle_app framebuffer_triangle_app.cpp)
+#target_link_libraries(framebuffer_triangle_app PRIVATE LtbVlk::LtbVlk)
+
+#add_executable(external_triangle_app external_triangle_app.cpp)
+#target_link_libraries(external_triangle_app PRIVATE LtbVlk::LtbVlk)
 
 #add_executable(composite_app composite_app.cpp)
 #target_link_libraries(composite_app PRIVATE LtbVlk::LtbVlk)

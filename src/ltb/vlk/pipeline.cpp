@@ -10,142 +10,15 @@
 
 namespace ltb::vlk
 {
-namespace
-{
 
 template < Pipeline pipeline_type >
-auto initialize_render_pass(
-    VkFormat const      color_format,
-    VkImageLayout const final_layout,
-    VkDevice const&     device,
-    VkRenderPass&       render_pass
-)
-{
-    auto const attachments = std::vector{
-        VkAttachmentDescription{
-            .flags          = 0U,
-            .format         = color_format,
-            .samples        = VK_SAMPLE_COUNT_1_BIT,
-            .loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
-            .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
-            .finalLayout    = final_layout,
-        },
-    };
-
-    auto const color_attachment_refs = std::vector{
-        VkAttachmentReference{
-            .attachment = 0U,
-            .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        },
-    };
-
-    auto const subpasses = std::vector{
-        VkSubpassDescription{
-            .flags                   = 0U,
-            .pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS,
-            .inputAttachmentCount    = 0U,
-            .pInputAttachments       = nullptr,
-            .colorAttachmentCount    = static_cast< uint32 >( color_attachment_refs.size( ) ),
-            .pColorAttachments       = color_attachment_refs.data( ),
-            .pResolveAttachments     = nullptr,
-            .pDepthStencilAttachment = nullptr,
-            .preserveAttachmentCount = 0U,
-            .pPreserveAttachments    = nullptr,
-        },
-    };
-
-    auto subpass_dependencies = std::vector< VkSubpassDependency >{ };
-
-    if constexpr ( pipeline_type == Pipeline::Triangle )
-    {
-        subpass_dependencies = {
-            {
-                .srcSubpass    = VK_SUBPASS_EXTERNAL,
-                .dstSubpass    = 0U,
-                .srcStageMask  = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                .dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                .srcAccessMask = VK_ACCESS_NONE_KHR,
-                .dstAccessMask
-                = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
-            },
-            {
-                .srcSubpass   = 0U,
-                .dstSubpass   = VK_SUBPASS_EXTERNAL,
-                .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                .srcAccessMask
-                = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                .dstAccessMask   = VK_ACCESS_MEMORY_READ_BIT,
-                .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
-            },
-        };
-    }
-    else
-    {
-        subpass_dependencies = {
-            {
-                .srcSubpass    = VK_SUBPASS_EXTERNAL,
-                .dstSubpass    = 0U,
-                .srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                .dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                .srcAccessMask = 0U,
-                .dstAccessMask
-                = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
-                .dependencyFlags = 0U,
-            },
-        };
-    }
-
-    auto const render_pass_create_info = VkRenderPassCreateInfo{
-        .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .pNext           = nullptr,
-        .flags           = 0U,
-        .attachmentCount = static_cast< uint32 >( attachments.size( ) ),
-        .pAttachments    = attachments.data( ),
-        .subpassCount    = static_cast< uint32 >( subpasses.size( ) ),
-        .pSubpasses      = subpasses.data( ),
-        .dependencyCount = static_cast< uint32 >( subpass_dependencies.size( ) ),
-        .pDependencies   = subpass_dependencies.data( ),
-    };
-    CHECK_VK( ::vkCreateRenderPass( device, &render_pass_create_info, nullptr, &render_pass ) );
-    spdlog::debug( "vkCreateRenderPass()" );
-
-    return true;
-}
-
-} // namespace
-
-template < AppType app_type, Pipeline pipeline_type >
 auto initialize(
-    uint32 const                   max_frames_in_flight,
-    VkFormat                       color_format,
+    PipelineData< pipeline_type >& pipeline,
     VkDevice const&                device,
-    PipelineData< pipeline_type >& pipeline
+    VkRenderPass const&            render_pass,
+    uint32 const                   max_frames_in_flight
 ) -> bool
 {
-    if constexpr ( app_type == AppType::Headless )
-    {
-        CHECK_TRUE( initialize_render_pass< pipeline_type >(
-            color_format,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            device,
-            pipeline.render_pass
-        ) );
-    }
-    else
-    {
-        CHECK_TRUE( initialize_render_pass< pipeline_type >(
-            color_format,
-            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            device,
-            pipeline.render_pass
-        ) );
-    }
-
     auto descriptor_set_layouts = std::vector< VkDescriptorSetLayout >{ };
     auto push_constant_ranges   = std::vector< VkPushConstantRange >{ };
 
@@ -166,7 +39,7 @@ auto initialize(
     }
     else
     {
-        auto const descriptor_pool_sizes = std::vector{
+        auto const descriptor_pool_sizes = std::array{
             VkDescriptorPoolSize{
                 .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .descriptorCount = max_frames_in_flight,
@@ -252,7 +125,7 @@ auto initialize(
     auto frag_shader_path = config::spirv_shader_dir_path( );
     auto topology         = VkPrimitiveTopology{ };
 
-    if constexpr ( Pipeline::Triangle == pipeline_type )
+    if constexpr ( pipeline_type == Pipeline::Triangle )
     {
         vert_shader_path = vert_shader_path / "triangle.vert.spv";
         frag_shader_path = frag_shader_path / "triangle.frag.spv";
@@ -276,7 +149,7 @@ auto initialize(
     auto const vert_shader_module_create_info = VkShaderModuleCreateInfo{
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .pNext    = nullptr,
-        .flags    = 0,
+        .flags    = 0U,
         .codeSize = vert_shader_code.size( ) * sizeof( uint32_t ),
         .pCode    = vert_shader_code.data( ),
     };
@@ -291,7 +164,7 @@ auto initialize(
     auto const frag_shader_module_create_info = VkShaderModuleCreateInfo{
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .pNext    = nullptr,
-        .flags    = 0,
+        .flags    = 0U,
         .codeSize = frag_shader_code.size( ) * sizeof( uint32_t ),
         .pCode    = frag_shader_code.data( ),
     };
@@ -428,7 +301,7 @@ auto initialize(
         .pColorBlendState    = &color_blending,
         .pDynamicState       = &dynamic_state,
         .layout              = pipeline.pipeline_layout,
-        .renderPass          = pipeline.render_pass,
+        .renderPass          = render_pass,
         .subpass             = 0U,
         .basePipelineHandle  = nullptr,
         .basePipelineIndex   = -1,
@@ -449,17 +322,52 @@ auto initialize(
     return true;
 }
 
-template auto initialize<
-    AppType::Headless >( uint32, VkFormat, VkDevice const&, PipelineData< Pipeline::Triangle >& )
-    -> bool;
-template auto initialize<
-    AppType::Windowed >( uint32, VkFormat, VkDevice const&, PipelineData< Pipeline::Triangle >& )
-    -> bool;
-template auto initialize<
-    AppType::Headless >( uint32, VkFormat, VkDevice const&, PipelineData< Pipeline::Composite >& )
-    -> bool;
-template auto initialize<
-    AppType::Windowed >( uint32, VkFormat, VkDevice const&, PipelineData< Pipeline::Composite >& )
-    -> bool;
+template auto initialize(
+    PipelineData< Pipeline::Triangle >&,
+    VkDevice const&,
+    VkRenderPass const&,
+    uint32 const
+) -> bool;
+
+template auto initialize(
+    PipelineData< Pipeline::Composite >&,
+    VkDevice const&,
+    VkRenderPass const&,
+    uint32 const
+) -> bool;
+
+template < Pipeline pipeline_type >
+auto destroy( PipelineData< pipeline_type >& pipeline, VkDevice const& device ) -> void
+{
+    if ( nullptr != pipeline.pipeline )
+    {
+        ::vkDestroyPipeline( device, pipeline.pipeline, nullptr );
+        spdlog::debug( "vkDestroyPipeline()" );
+    }
+
+    if ( nullptr != pipeline.pipeline_layout )
+    {
+        ::vkDestroyPipelineLayout( device, pipeline.pipeline_layout, nullptr );
+        spdlog::debug( "vkDestroyPipelineLayout()" );
+    }
+
+    if constexpr ( Pipeline::Composite == pipeline_type )
+    {
+        if ( nullptr != pipeline.descriptor_set_layout )
+        {
+            ::vkDestroyDescriptorSetLayout( device, pipeline.descriptor_set_layout, nullptr );
+            spdlog::debug( "vkDestroyDescriptorSetLayout()" );
+        }
+
+        if ( nullptr != pipeline.descriptor_pool )
+        {
+            ::vkDestroyDescriptorPool( device, pipeline.descriptor_pool, nullptr );
+            spdlog::debug( "vkDestroyDescriptorPool()" );
+        }
+    }
+}
+
+template auto destroy( PipelineData< Pipeline::Triangle >&, VkDevice const& ) -> void;
+template auto destroy( PipelineData< Pipeline::Composite >&, VkDevice const& ) -> void;
 
 } // namespace ltb::vlk
