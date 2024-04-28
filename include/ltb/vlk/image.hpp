@@ -12,10 +12,12 @@ namespace ltb::vlk
 template < ExternalMemory mem_type >
 struct ImageData
 {
-    VkExtent2D     image_size         = { };
-    VkImage        color_image        = { };
-    VkDeviceMemory color_image_memory = { };
-    VkImageView    color_image_view   = { };
+    VkExtent2D           image_size          = { };
+    VkImage              color_image         = { };
+    VkMemoryRequirements memory_requirements = { };
+    uint32               memory_type_index   = { };
+    VkDeviceMemory       color_image_memory  = { };
+    VkImageView          color_image_view    = { };
 };
 
 /// \brief Initialize all the fields of an ImageData struct.
@@ -54,6 +56,30 @@ auto initialize(
         image_extents,
         color_format,
         import_image_fd
+    );
+}
+
+/// \brief Get the file descriptor of an image with external memory storage.
+auto get_file_descriptor(
+    int32&                file_descriptor,
+    VkInstance const&     instance,
+    VkDevice const&       device,
+    VkDeviceMemory const& image_memory
+) -> bool;
+
+/// \brief Get the file descriptor of an image with external memory storage.
+template < AppType setup_app_type >
+auto get_file_descriptor(
+    int32&                                     file_descriptor,
+    SetupData< setup_app_type > const&         setup,
+    ImageData< ExternalMemory::Export > const& image
+) -> bool
+{
+    return get_file_descriptor(
+        file_descriptor,
+        setup.instance,
+        setup.device,
+        image.color_image_memory
     );
 }
 

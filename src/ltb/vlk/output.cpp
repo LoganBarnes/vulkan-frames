@@ -67,45 +67,17 @@ auto initialize_render_pass(
         },
     };
 
-    auto subpass_dependencies = std::vector< VkSubpassDependency >{ };
-
-    if constexpr ( app_type == AppType::Headless )
-    {
-        subpass_dependencies = {
-            {
-                .srcSubpass      = VK_SUBPASS_EXTERNAL,
-                .dstSubpass      = 0U,
-                .srcStageMask    = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                .dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                .srcAccessMask   = VK_ACCESS_NONE_KHR,
-                .dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
-                .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
-            },
-            {
-                .srcSubpass      = 0U,
-                .dstSubpass      = VK_SUBPASS_EXTERNAL,
-                .srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                .dstStageMask    = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                .srcAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
-                .dstAccessMask   = VK_ACCESS_MEMORY_READ_BIT,
-                .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
-            },
-        };
-    }
-    else
-    {
-        subpass_dependencies = {
-            {
-                .srcSubpass      = VK_SUBPASS_EXTERNAL,
-                .dstSubpass      = 0U,
-                .srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                .dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                .srcAccessMask   = 0U,
-                .dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                .dependencyFlags = 0U,
-            },
-        };
-    }
+    auto const subpass_dependencies = std::array{
+        VkSubpassDependency{
+            .srcSubpass      = VK_SUBPASS_EXTERNAL,
+            .dstSubpass      = 0U,
+            .srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .srcAccessMask   = 0U,
+            .dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dependencyFlags = 0U,
+        },
+    };
 
     auto const render_pass_create_info = VkRenderPassCreateInfo{
         .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,

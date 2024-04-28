@@ -7,8 +7,11 @@
 #include "ltb/vlk/check.hpp"
 #include "ltb/vlk/render.hpp"
 
-// https://stackoverflow.com/questions/61089060/vulkan-render-to-texture
-// https://github.com/SaschaWillems/Vulkan/blob/master/examples/offscreen/offscreen.cpp
+// Need to do some reading to get this to work:
+// https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VK_KHR_external_memory.html
+
+// Maybe follow this example:
+// https://github.com/KhronosGroup/Vulkan-Samples/tree/main/samples/extensions/open_gl_interop
 
 namespace ltb
 {
@@ -22,15 +25,8 @@ constexpr auto max_frames_in_flight = uint32_t{ 2 };
 class App
 {
 public:
-    App( )                               = default;
-    App( App const& )                    = delete;
-    App( App&& )                         = delete;
-    auto operator=( App const& ) -> App& = delete;
-    auto operator=( App&& ) -> App&      = delete;
-    ~App( );
-
     auto initialize( uint32 physical_device_index ) -> bool;
-
+    auto destroy( ) -> void;
     auto run( ) -> bool;
 
 private:
@@ -40,71 +36,65 @@ private:
     vlk::PipelineData< vlk::Pipeline::Composite > composite_pipeline_ = { };
     vlk::SyncData< vlk::AppType::Windowed >       windowed_sync_      = { };
 
-    vlk::PipelineData< vlk::Pipeline::Triangle > triangle_pipeline_ = { };
-    vlk::OutputData< vlk::AppType::Headless >    headless_output_   = { };
-    vlk::SyncData< vlk::AppType::Headless >      headless_sync_     = { };
+    vlk::ImageData< vlk::ExternalMemory::Export > exported_image_    = { };
+    vlk::OutputData< vlk::AppType::Headless >     headless_output_   = { };
+    vlk::PipelineData< vlk::Pipeline::Triangle >  triangle_pipeline_ = { };
+    vlk::SyncData< vlk::AppType::Headless >       headless_sync_     = { };
 
-    VkSampler color_image_sampler_ = { };
+    int32                                         color_image_fd_      = -1;
+    vlk::ImageData< vlk::ExternalMemory::Import > imported_image_      = { };
+    VkSampler                                     color_image_sampler_ = { };
+
+    auto initialize_image( ) -> bool;
 };
-
-App::~App( )
-{
-    if ( nullptr != color_image_sampler_ )
-    {
-        ::vkDestroySampler( windowed_setup_.device, color_image_sampler_, nullptr );
-        spdlog::debug( "vkDestroySampler()" );
-    }
-
-    vlk::destroy( windowed_setup_, headless_sync_ );
-    vlk::destroy( windowed_setup_, headless_output_ );
-    vlk::destroy( windowed_setup_, triangle_pipeline_ );
-
-    vlk::destroy( windowed_setup_, windowed_sync_ );
-    vlk::destroy( windowed_setup_, windowed_output_ );
-    vlk::destroy( windowed_setup_, composite_pipeline_ );
-
-    vlk::destroy( windowed_setup_ );
-}
 
 auto App::initialize( uint32 const physical_device_index ) -> bool
 {
-    CHECK_TRUE( vlk::initialize( physical_device_index, windowed_setup_ ) );
+    // Display setup objects
+    CHECK_TRUE( vlk::initialize( windowed_setup_, physical_device_index ) );
+    CHECK_TRUE( vlk::initialize( windowed_output_, windowed_setup_ ) );
 
-    CHECK_TRUE( vlk::initialize< vlk::AppType::Windowed >(
-        max_frames_in_flight,
-        windowed_setup_.surface_format.format,
-        windowed_setup_.device,
-        composite_pipeline_
-    ) );
-    CHECK_TRUE( vlk::initialize( windowed_setup_, composite_pipeline_, windowed_output_ ) );
-    CHECK_TRUE( vlk::initialize(
-        max_frames_in_flight,
-        windowed_setup_.device,
-        windowed_setup_.graphics_command_pool,
-        windowed_sync_
-    ) );
+    // Offscreen pipeline objects
+    auto const image_extents = VkExtent3D{
+        windowed_output_.framebuffer_size.width,
+        windowed_output_.framebuffer_size.height,
+        1U
+    };
+    auto constexpr unused_image_fd = -1;
+    CHECK_TRUE( vlk::initialize( exported_image_, windowed_setup_, image_extents, unused_image_fd )
+    );
+    CHECK_TRUE( vlk::initialize( headless_output_, windowed_setup_, exported_image_ ) );
+    CHECK_TRUE( vlk::initialize( triangle_pipeline_, windowed_setup_, headless_output_ ) );
+    CHECK_TRUE( vlk::initialize( headless_sync_, windowed_setup_ ) );
 
-    CHECK_TRUE( vlk::initialize< vlk::AppType::Headless >(
-        windowed_setup_.surface_format.format,
-        windowed_setup_.device,
-        triangle_pipeline_
-    ) );
+    // Display pipeline objects
     CHECK_TRUE( vlk::initialize(
-        VkExtent3D{
-            windowed_output_.framebuffer_size.width,
-            windowed_output_.framebuffer_size.height,
-            1U
-        },
-        vlk::ExternalMemory::Yes,
+        composite_pipeline_,
         windowed_setup_,
-        triangle_pipeline_,
-        headless_output_
+        windowed_output_,
+        max_frames_in_flight
     ) );
-    CHECK_TRUE( vlk::initialize(
-        windowed_setup_.device,
-        windowed_setup_.graphics_command_pool,
-        headless_sync_
-    ) );
+    CHECK_TRUE( vlk::initialize( windowed_sync_, windowed_setup_, max_frames_in_flight ) );
+
+    CHECK_TRUE( initialize_image( ) );
+
+    return true;
+}
+
+auto App::initialize_image( ) -> bool
+{
+    auto const image_extents = VkExtent3D{
+        headless_output_.framebuffer_size.width,
+        headless_output_.framebuffer_size.height,
+        1U
+    };
+
+    // Image data for the display pipeline.
+    CHECK_TRUE( vlk::get_file_descriptor( color_image_fd_, windowed_setup_, exported_image_ ) );
+    spdlog::info( "Color image file descriptor: {}", color_image_fd_ );
+
+    CHECK_TRUE( vlk::initialize( imported_image_, windowed_setup_, image_extents, color_image_fd_ )
+    );
 
     auto physical_device_properties = VkPhysicalDeviceProperties{ };
     ::vkGetPhysicalDeviceProperties( windowed_setup_.physical_device, &physical_device_properties );
@@ -137,7 +127,7 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
     {
         auto const image_info = VkDescriptorImageInfo{
             .sampler     = color_image_sampler_,
-            .imageView   = headless_output_.color_image_view,
+            .imageView   = imported_image_.color_image_view,
             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         };
         auto const descriptor_writes = std::array{
@@ -162,8 +152,33 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
             nullptr
         );
     }
-
     return true;
+}
+
+auto App::destroy( ) -> void
+{
+    if ( nullptr != color_image_sampler_ )
+    {
+        ::vkDestroySampler( windowed_setup_.device, color_image_sampler_, nullptr );
+        spdlog::debug( "vkDestroySampler()" );
+    }
+
+    // if ( ( -1 != color_image_fd_ ) && ( ::close( color_image_fd_ ) < 0 ) )
+    // {
+    //     spdlog::error( "close(color_image_fd) failed: {}", std::strerror( errno ) );
+    // }
+    vlk::destroy( imported_image_, windowed_setup_ );
+
+    vlk::destroy( headless_sync_, windowed_setup_ );
+    vlk::destroy( triangle_pipeline_, windowed_setup_ );
+    vlk::destroy( headless_output_, windowed_setup_ );
+    vlk::destroy( exported_image_, windowed_setup_ );
+
+    vlk::destroy( windowed_sync_, windowed_setup_ );
+    vlk::destroy( composite_pipeline_, windowed_setup_ );
+    vlk::destroy( windowed_output_, windowed_setup_ );
+
+    vlk::destroy( windowed_setup_ );
 }
 
 auto App::run( ) -> bool
@@ -193,9 +208,13 @@ auto App::run( ) -> bool
         );
 
         // Render pipeline here.
-        CHECK_TRUE(
-            vlk::render( windowed_setup_, composite_pipeline_, windowed_output_, windowed_sync_ )
-        );
+        CHECK_TRUE( vlk::render(
+            windowed_setup_,
+            composite_pipeline_,
+            imported_image_,
+            windowed_output_,
+            windowed_sync_
+        ) );
 
         windowed_sync_.current_frame = ( windowed_sync_.current_frame + 1U ) % max_frames_in_flight;
 
@@ -228,10 +247,12 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> ltb::int32
     if ( auto app = ltb::App( ); app.initialize( physical_device_index ) && app.run( ) )
     {
         spdlog::info( "Done." );
+        app.destroy( );
         return EXIT_SUCCESS;
     }
     else
     {
+        app.destroy( );
         return EXIT_FAILURE;
     }
 }

@@ -9,6 +9,8 @@
 // standard
 #include <optional>
 
+// https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VK_KHR_external_memory.html
+
 namespace ltb::vlk
 {
 namespace
@@ -93,11 +95,14 @@ auto initialize(
         spdlog::debug( "vkCreateImage() w/ external memory" );
     }
 
-    auto color_image_mem_reqs = VkMemoryRequirements{ };
-    ::vkGetImageMemoryRequirements( device, image.color_image, &color_image_mem_reqs );
+    ::vkGetImageMemoryRequirements( device, image.color_image, &image.memory_requirements );
 
-    auto const memory_type_index = get_memory_type_index( physical_device, color_image_mem_reqs );
-    if ( !memory_type_index )
+    if ( auto const memory_type_index
+         = get_memory_type_index( physical_device, image.memory_requirements ) )
+    {
+        image.memory_type_index = memory_type_index.value( );
+    }
+    else
     {
         spdlog::error( "No suitable memory type found" );
         return false;
@@ -106,8 +111,8 @@ auto initialize(
     auto color_image_alloc_info = VkMemoryAllocateInfo{
         .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .pNext           = nullptr,
-        .allocationSize  = color_image_mem_reqs.size,
-        .memoryTypeIndex = memory_type_index.value( ),
+        .allocationSize  = image.memory_requirements.size,
+        .memoryTypeIndex = image.memory_type_index,
     };
 
     if constexpr ( mem_type == ExternalMemory::Export )
@@ -141,7 +146,6 @@ auto initialize(
             .fd         = import_image_fd,
         };
         color_image_alloc_info.pNext = &export_image_memory_info;
-
         CHECK_VK( ::vkAllocateMemory(
             device,
             &color_image_alloc_info,
@@ -161,7 +165,7 @@ auto initialize(
         spdlog::debug( "vkAllocateMemory()" );
     }
 
-    CHECK_VK( ::vkBindImageMemory( device, image.color_image, image.color_image_memory, 0 ) );
+    CHECK_VK( ::vkBindImageMemory( device, image.color_image, image.color_image_memory, 0U ) );
 
     auto const color_image_view_create_info = VkImageViewCreateInfo{
         .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -214,6 +218,34 @@ template auto initialize(
     VkFormat,
     int32
 ) -> bool;
+
+auto get_file_descriptor(
+    int32&                file_descriptor,
+    VkInstance const&     instance,
+    VkDevice const&       device,
+    VkDeviceMemory const& image_memory
+) -> bool
+{
+    auto* const vkGetMemoryFdKHR = reinterpret_cast< PFN_vkGetMemoryFdKHR >(
+        ::vkGetInstanceProcAddr( instance, "vkGetMemoryFdKHR" )
+    );
+    if ( nullptr == vkGetMemoryFdKHR )
+    {
+        spdlog::error( "vkGetInstanceProcAddr() failed" );
+        return false;
+    }
+
+    auto const memory_info = VkMemoryGetFdInfoKHR{
+        .sType      = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR,
+        .pNext      = nullptr,
+        .memory     = image_memory,
+        .handleType = external_memory_handle_type,
+    };
+    CHECK_VK( vkGetMemoryFdKHR( device, &memory_info, &file_descriptor ) );
+    spdlog::debug( "vkGetMemoryFdKHR()" );
+
+    return true;
+}
 
 template < ExternalMemory mem_type >
 auto destroy( ImageData< mem_type >& image, VkDevice const& device ) -> void

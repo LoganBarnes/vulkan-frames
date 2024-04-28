@@ -24,7 +24,6 @@ class App
 public:
     auto initialize( uint32 physical_device_index ) -> bool;
     auto destroy( ) -> void;
-
     auto run( ) -> bool;
 
 private:

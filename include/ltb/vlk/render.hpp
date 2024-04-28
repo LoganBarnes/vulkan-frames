@@ -23,6 +23,22 @@ auto render(
     SyncData< output_app_type > const&   sync
 ) -> bool
 {
+    return render( setup, pipeline, ImageData< ExternalMemory::None >{ }, output, sync );
+}
+
+template <
+    AppType        setup_app_type,
+    Pipeline       pipeline_type,
+    ExternalMemory mem_type,
+    AppType        output_app_type >
+auto render(
+    SetupData< setup_app_type > const&   setup,
+    PipelineData< pipeline_type > const& pipeline,
+    ImageData< mem_type > const&         image,
+    OutputData< output_app_type > const& output,
+    SyncData< output_app_type > const&   sync
+) -> bool
+{
     auto* graphics_queue_fence = VkFence{ };
 
     if constexpr ( AppType::Windowed == output_app_type )
@@ -83,6 +99,40 @@ auto render(
         .pInheritanceInfo = nullptr,
     };
     CHECK_VK( ::vkBeginCommandBuffer( command_buffer, &begin_info ) );
+
+    if constexpr ( mem_type == ExternalMemory::Import )
+    {
+        auto const barrier = VkImageMemoryBarrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = VK_ACCESS_NONE,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = image.color_image,
+            .subresourceRange = VkImageSubresourceRange{
+                   .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                   .baseMipLevel   = 0U,
+                   .levelCount     = 1U,
+                   .baseArrayLayer = 0U,
+                   .layerCount     = 1U,
+            },
+        };
+        ::vkCmdPipelineBarrier(
+            command_buffer,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0U,
+            0U,
+            nullptr,
+            0U,
+            nullptr,
+            1U,
+            &barrier
+        );
+    }
 
     auto const clear_values = std::array{
         VkClearValue{
