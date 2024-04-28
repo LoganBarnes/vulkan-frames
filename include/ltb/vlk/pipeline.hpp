@@ -74,15 +74,25 @@ auto initialize(
 ) -> bool;
 
 /// \brief A wrapper function around the main initialize function.
-template < Pipeline pipeline_type, AppType setup_app_type, AppType output_app_type >
+template < Pipeline pipeline_type, AppType setup_app_type >
 auto initialize(
-    PipelineData< pipeline_type >&       pipeline,
-    SetupData< setup_app_type > const&   setup,
-    OutputData< output_app_type > const& output,
-    uint32                               max_frames_in_flight
+    PipelineData< pipeline_type >&         pipeline,
+    SetupData< setup_app_type > const&     setup,
+    OutputData< AppType::Windowed > const& output,
+    uint32                                 max_frames_in_flight
 ) -> bool
 {
     return initialize( pipeline, setup.device, output.render_pass, max_frames_in_flight );
+}
+
+template < Pipeline pipeline_type, AppType setup_app_type >
+auto initialize(
+    PipelineData< pipeline_type >&         pipeline,
+    SetupData< setup_app_type > const&     setup,
+    OutputData< AppType::Headless > const& output
+) -> bool
+{
+    return initialize( pipeline, setup.device, output.render_pass, 1U );
 }
 
 /// \brief Destroy all the fields of a PipelineData struct.

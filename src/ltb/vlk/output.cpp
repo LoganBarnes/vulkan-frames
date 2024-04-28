@@ -284,12 +284,14 @@ auto initialize(
     OutputData< AppType::Headless >& output,
     VkDevice const&                  device,
     VkImageView const&               color_image_view,
-    VkExtent3D const&                image_extent,
+    VkExtent2D const&                image_extent,
     VkFormat const                   color_format
 ) -> bool
 {
+    output.framebuffer_size = image_extent;
+
     CHECK_TRUE(
-        initialize_render_pass< AppType::Windowed >( output.render_pass, color_format, device )
+        initialize_render_pass< AppType::Headless >( output.render_pass, color_format, device )
     );
 
     auto const framebuffer_create_info = VkFramebufferCreateInfo{

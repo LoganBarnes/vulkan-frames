@@ -5,7 +5,7 @@
 
 // project
 #include "ltb/vlk/check.hpp"
-#include "ltb/vlk/texture.hpp"
+#include "ltb/vlk/image.hpp"
 
 namespace ltb::vlk
 {
@@ -49,7 +49,7 @@ auto initialize(
     OutputData< AppType::Headless >& output,
     VkDevice const&                  device,
     VkImageView const&               color_image_view,
-    VkExtent3D const&                image_extent,
+    VkExtent2D const&                image_extent,
     VkFormat                         color_format
 ) -> bool;
 
@@ -64,7 +64,7 @@ template < AppType setup_app_type, ExternalMemory mem_type >
 auto initialize(
     OutputData< AppType::Headless >&   output,
     SetupData< setup_app_type > const& setup,
-    Image< mem_type > const&           image
+    ImageData< mem_type > const&       image
 ) -> bool
 {
     auto color_format = VkFormat{ };

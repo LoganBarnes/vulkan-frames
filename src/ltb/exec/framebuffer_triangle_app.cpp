@@ -22,14 +22,8 @@ constexpr auto max_frames_in_flight = uint32_t{ 2 };
 class App
 {
 public:
-    App( )                               = default;
-    App( App const& )                    = delete;
-    App( App&& )                         = delete;
-    auto operator=( App const& ) -> App& = delete;
-    auto operator=( App&& ) -> App&      = delete;
-    ~App( );
-
     auto initialize( uint32 physical_device_index ) -> bool;
+    auto destroy( ) -> void;
 
     auto run( ) -> bool;
 
@@ -37,69 +31,44 @@ private:
     // Vulkan data
     vlk::SetupData< vlk::AppType::Windowed > setup_ = { };
 
-    vlk::PipelineData< vlk::Pipeline::Composite > composite_pipeline_ = { };
     vlk::OutputData< vlk::AppType::Windowed >     windowed_output_    = { };
+    vlk::PipelineData< vlk::Pipeline::Composite > composite_pipeline_ = { };
     vlk::SyncData< vlk::AppType::Windowed >       windowed_sync_      = { };
 
-    vlk::PipelineData< vlk::Pipeline::Triangle > triangle_pipeline_ = { };
+    vlk::ImageData< vlk::ExternalMemory::None >  shared_image_      = { };
     vlk::OutputData< vlk::AppType::Headless >    headless_output_   = { };
+    vlk::PipelineData< vlk::Pipeline::Triangle > triangle_pipeline_ = { };
     vlk::SyncData< vlk::AppType::Headless >      headless_sync_     = { };
 
     VkSampler color_image_sampler_ = { };
 };
 
-App::~App( )
-{
-    if ( nullptr != color_image_sampler_ )
-    {
-        ::vkDestroySampler( setup_.device, color_image_sampler_, nullptr );
-        spdlog::debug( "vkDestroySampler()" );
-    }
-
-    vlk::destroy( setup_, headless_sync_ );
-    vlk::destroy( setup_, headless_output_ );
-    vlk::destroy( setup_, triangle_pipeline_ );
-
-    vlk::destroy( setup_, windowed_sync_ );
-    vlk::destroy( setup_, windowed_output_ );
-    vlk::destroy( setup_, composite_pipeline_ );
-
-    vlk::destroy( setup_ );
-}
-
 auto App::initialize( uint32 const physical_device_index ) -> bool
 {
-    CHECK_TRUE( vlk::initialize( physical_device_index, setup_ ) );
+    CHECK_TRUE( vlk::initialize( setup_, physical_device_index ) );
 
-    CHECK_TRUE( vlk::initialize< vlk::AppType::Windowed >(
-        max_frames_in_flight,
-        setup_.surface_format.format,
-        setup_.device,
-        composite_pipeline_
-    ) );
-    CHECK_TRUE( vlk::initialize( setup_, composite_pipeline_, windowed_output_ ) );
-    CHECK_TRUE( vlk::initialize(
-        max_frames_in_flight,
-        setup_.device,
-        setup_.graphics_command_pool,
-        windowed_sync_
-    ) );
+    // Display pipeline objects
+    CHECK_TRUE( vlk::initialize( windowed_output_, setup_ ) );
+    CHECK_TRUE(
+        vlk::initialize( composite_pipeline_, setup_, windowed_output_, max_frames_in_flight )
+    );
+    CHECK_TRUE( vlk::initialize( windowed_sync_, setup_, max_frames_in_flight ) );
 
-    CHECK_TRUE( vlk::initialize<
-                vlk::AppType::
-                    Headless >( setup_.surface_format.format, setup_.device, triangle_pipeline_ ) );
+    // Offscreen pipeline objects
+    auto constexpr unused_image_fd = -1;
     CHECK_TRUE( vlk::initialize(
+        shared_image_,
+        setup_,
         VkExtent3D{
             windowed_output_.framebuffer_size.width,
             windowed_output_.framebuffer_size.height,
             1U
         },
-        vlk::ExternalMemory::No,
-        setup_,
-        triangle_pipeline_,
-        headless_output_
+        unused_image_fd
     ) );
-    CHECK_TRUE( vlk::initialize( setup_.device, setup_.graphics_command_pool, headless_sync_ ) );
+    CHECK_TRUE( vlk::initialize( headless_output_, setup_, shared_image_ ) );
+    CHECK_TRUE( vlk::initialize( triangle_pipeline_, setup_, headless_output_ ) );
+    CHECK_TRUE( vlk::initialize( headless_sync_, setup_ ) );
 
     auto physical_device_properties = VkPhysicalDeviceProperties{ };
     ::vkGetPhysicalDeviceProperties( setup_.physical_device, &physical_device_properties );
@@ -130,7 +99,7 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
     {
         auto const image_info = VkDescriptorImageInfo{
             .sampler     = color_image_sampler_,
-            .imageView   = headless_output_.color_image_view,
+            .imageView   = shared_image_.color_image_view,
             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         };
         auto const descriptor_writes = std::array{
@@ -157,6 +126,26 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
     }
 
     return true;
+}
+
+auto App::destroy( ) -> void
+{
+    if ( nullptr != color_image_sampler_ )
+    {
+        ::vkDestroySampler( setup_.device, color_image_sampler_, nullptr );
+        spdlog::debug( "vkDestroySampler()" );
+    }
+
+    vlk::destroy( headless_sync_, setup_ );
+    vlk::destroy( triangle_pipeline_, setup_ );
+    vlk::destroy( headless_output_, setup_ );
+    vlk::destroy( shared_image_, setup_ );
+
+    vlk::destroy( windowed_sync_, setup_ );
+    vlk::destroy( composite_pipeline_, setup_ );
+    vlk::destroy( windowed_output_, setup_ );
+
+    vlk::destroy( setup_ );
 }
 
 auto App::run( ) -> bool
@@ -217,10 +206,12 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> ltb::int32
     if ( auto app = ltb::App( ); app.initialize( physical_device_index ) && app.run( ) )
     {
         spdlog::info( "Done." );
+        app.destroy( );
         return EXIT_SUCCESS;
     }
     else
     {
+        app.destroy( );
         return EXIT_FAILURE;
     }
 }

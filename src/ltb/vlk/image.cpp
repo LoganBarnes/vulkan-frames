@@ -1,7 +1,7 @@
 // /////////////////////////////////////////////////////////////
 // A Logan Thomas Barnes project
 // /////////////////////////////////////////////////////////////
-#include "ltb/vlk/texture.hpp"
+#include "ltb/vlk/image.hpp"
 
 // project
 #include "ltb/vlk/check.hpp"
@@ -45,12 +45,12 @@ auto get_memory_type_index(
 
 template < ExternalMemory mem_type >
 auto initialize(
+    ImageData< mem_type >&  image,
     VkPhysicalDevice const& physical_device,
     VkDevice const&         device,
     VkExtent3D const        image_extents,
     VkFormat const          color_format,
-    int32 const             color_image_fd,
-    Image< mem_type >&      image
+    int32 const             import_image_fd
 ) -> bool
 {
     image.image_size = VkExtent2D{ image_extents.width, image_extents.height };
@@ -129,7 +129,7 @@ auto initialize(
     }
     else if constexpr ( mem_type == ExternalMemory::Import )
     {
-        if ( color_image_fd < 0 )
+        if ( import_image_fd < 0 )
         {
             spdlog::error( "Invalid file descriptor" );
             return false;
@@ -138,7 +138,7 @@ auto initialize(
             .sType      = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
             .pNext      = nullptr,
             .handleType = external_memory_handle_type,
-            .fd         = color_image_fd,
+            .fd         = import_image_fd,
         };
         color_image_alloc_info.pNext = &export_image_memory_info;
 
@@ -190,8 +190,33 @@ auto initialize(
     return true;
 }
 
+template auto initialize(
+    ImageData< ExternalMemory::None >&,
+    VkPhysicalDevice const&,
+    VkDevice const&,
+    VkExtent3D,
+    VkFormat,
+    int32
+) -> bool;
+template auto initialize(
+    ImageData< ExternalMemory::Export >&,
+    VkPhysicalDevice const&,
+    VkDevice const&,
+    VkExtent3D,
+    VkFormat,
+    int32
+) -> bool;
+template auto initialize(
+    ImageData< ExternalMemory::Import >&,
+    VkPhysicalDevice const&,
+    VkDevice const&,
+    VkExtent3D,
+    VkFormat,
+    int32
+) -> bool;
+
 template < ExternalMemory mem_type >
-auto destroy( VkDevice const& device, Image< mem_type >& image ) -> void
+auto destroy( ImageData< mem_type >& image, VkDevice const& device ) -> void
 {
     if ( nullptr != image.color_image_view )
     {
@@ -211,5 +236,9 @@ auto destroy( VkDevice const& device, Image< mem_type >& image ) -> void
         spdlog::debug( "vkDestroyImage()" );
     }
 }
+
+template auto destroy( ImageData< ExternalMemory::None >&, VkDevice const& device ) -> void;
+template auto destroy( ImageData< ExternalMemory::Export >&, VkDevice const& device ) -> void;
+template auto destroy( ImageData< ExternalMemory::Import >&, VkDevice const& device ) -> void;
 
 } // namespace ltb::vlk

@@ -106,7 +106,7 @@ auto initialize(
 auto initialize(
     SyncData< AppType::Windowed >&        sync,
     SetupData< AppType::Windowed > const& setup,
-    uint32                const                max_frames_in_flight
+    uint32 const                          max_frames_in_flight
 ) -> bool
 {
     return initialize( sync, setup.device, setup.graphics_command_pool, max_frames_in_flight );

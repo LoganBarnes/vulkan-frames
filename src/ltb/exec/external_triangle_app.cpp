@@ -84,9 +84,11 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
         windowed_sync_
     ) );
 
-    CHECK_TRUE( vlk::initialize<
-                vlk::AppType::
-                    Headless >( windowed_setup_.surface_format.format, windowed_setup_.device, triangle_pipeline_ ) );
+    CHECK_TRUE( vlk::initialize< vlk::AppType::Headless >(
+        windowed_setup_.surface_format.format,
+        windowed_setup_.device,
+        triangle_pipeline_
+    ) );
     CHECK_TRUE( vlk::initialize(
         VkExtent3D{
             windowed_output_.framebuffer_size.width,
@@ -98,7 +100,11 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
         triangle_pipeline_,
         headless_output_
     ) );
-    CHECK_TRUE( vlk::initialize( windowed_setup_.device, windowed_setup_.graphics_command_pool, headless_sync_ ) );
+    CHECK_TRUE( vlk::initialize(
+        windowed_setup_.device,
+        windowed_setup_.graphics_command_pool,
+        headless_sync_
+    ) );
 
     auto physical_device_properties = VkPhysicalDeviceProperties{ };
     ::vkGetPhysicalDeviceProperties( windowed_setup_.physical_device, &physical_device_properties );
@@ -123,7 +129,9 @@ auto App::initialize( uint32 const physical_device_index ) -> bool
         .borderColor             = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
         .unnormalizedCoordinates = VK_FALSE,
     };
-    CHECK_VK( ::vkCreateSampler( windowed_setup_.device, &sampler_info, nullptr, &color_image_sampler_ ) );
+    CHECK_VK(
+        ::vkCreateSampler( windowed_setup_.device, &sampler_info, nullptr, &color_image_sampler_ )
+    );
 
     for ( auto i = 0U; i < max_frames_in_flight; ++i )
     {
@@ -180,10 +188,14 @@ auto App::run( ) -> bool
             = M_PI_2f * angular_velocity_rps * current_duration_s;
 
         // Render offline triangle.
-        CHECK_TRUE( vlk::render( windowed_setup_, triangle_pipeline_, headless_output_, headless_sync_ ) );
+        CHECK_TRUE(
+            vlk::render( windowed_setup_, triangle_pipeline_, headless_output_, headless_sync_ )
+        );
 
         // Render pipeline here.
-        CHECK_TRUE( vlk::render( windowed_setup_, composite_pipeline_, windowed_output_, windowed_sync_ ) );
+        CHECK_TRUE(
+            vlk::render( windowed_setup_, composite_pipeline_, windowed_output_, windowed_sync_ )
+        );
 
         windowed_sync_.current_frame = ( windowed_sync_.current_frame + 1U ) % max_frames_in_flight;
 
